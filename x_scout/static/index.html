@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X Scout</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">X Scout</div>
+    <div class="status">
+      <span id="loginPill" class="pill">X: …</span>
+      <button id="loginBtn" class="ghost">Log in to X</button>
+      <button id="checkBtn" class="ghost" title="Open the profile headless and look for a session">Check</button>
+    </div>
+    <div class="actions">
+      <select id="runSelect" title="Past runs"></select>
+      <button id="reBtn" class="ghost" title="Run Claude again on this run's posts, no scraping">Re-analyze</button>
+      <button id="settingsBtn" class="ghost">Settings</button>
+      <button id="runBtn" class="primary">Run</button>
+    </div>
+  </header>
+
+  <section id="progress" class="progress hidden">
+    <div class="progress-head"><span class="spinner"></span><b id="step"></b><button id="logToggle" class="link">log</button></div>
+    <pre id="log" class="log hidden"></pre>
+  </section>
+
+  <section id="settings" class="settings hidden">
+    <div class="settings-grid">
+      <div>
+        <h3>Topics <small>(up to 5)</small></h3>
+        <p class="hint">Name is shown in the UI. Query is what goes to X search (any X operators); empty = the name.</p>
+        <div id="topics"></div>
+        <button id="addTopic" class="ghost small">+ topic</button>
+        <h3>Scraping</h3>
+        <label>Language <input id="lang" size="4" placeholder="en"></label>
+        <label>Posts per tab (Top / Latest) <input id="perMode" type="number" min="10" max="60"></label>
+        <label>Candidates per topic sent to Claude <input id="cands" type="number" min="10" max="40"></label>
+        <label>Model <select id="model"><option>sonnet</option><option>haiku</option><option>opus</option></select></label>
+        <label class="row"><input id="headless" type="checkbox"> run browser hidden (headless)</label>
+      </div>
+      <div>
+        <h3>About me <small>(Claude uses it for the “useful” column)</small></h3>
+        <textarea id="profile" rows="16"></textarea>
+      </div>
+    </div>
+    <div class="settings-foot">
+      <span id="saveMsg" class="hint"></span>
+      <button id="saveBtn" class="primary">Save</button>
+    </div>
+  </section>
+
+  <main>
+    <div id="meta" class="meta"></div>
+    <nav id="tabs" class="tabs"></nav>
+    <div id="board" class="board"></div>
+    <div id="empty" class="empty hidden">
+      <h2>No runs yet</h2>
+      <p>1. <b>Log in to X</b> (a Chrome window opens, use your secondary account).<br>
+         2. Add topics in <b>Settings</b>.<br>
+         3. Press <b>Run</b>. Takes a few minutes: search is paced like a person.</p>
+    </div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Start x-scout and open it in the browser. Needs uv (https://docs.astral.sh/uv/) and Google Chrome.
+set -euo pipefail
+cd "$(dirname "$0")"
+uv sync -q
+exec uv run x-scout
