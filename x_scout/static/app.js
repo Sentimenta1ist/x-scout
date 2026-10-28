@@ -14,6 +14,7 @@ const COLS = [
 let current = null;      // loaded run
 let activeTopic = null;
 let wasRunning = false;
+let logOpen = false;
 
 // "seen" marks are a per-browser convenience
 const seen = (() => {
@@ -29,31 +30,51 @@ const k = (n) => n == null ? "?" : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$
 const age = (m) => m == null ? "?" : m < 60 ? Math.round(m) + "m" : m < 1440 ? (m / 60).toFixed(1).replace(/\.0$/, "") + "h" : Math.round(m / 1440) + "d";
 const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
+const ICON = {
+  views: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  likes: '<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>',
+  replies: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+  reposts: '<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  bookmarks: '<path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+};
+const icon = (name) => `<svg viewBox="0 0 24 24" class="ic" aria-hidden="true">${ICON[name]}</svg>`;
+const hue = (str) => [...str].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+// escape, then turn bare links into a small "link" anchor so t.co noise doesn't eat lines
+const richText = (t) => esc((t || "").replace(/\n\s*\n+/g, "\n")).replace(/https?:\/\/\S+/g, (u) => `<a class="inl" href="${u}" target="_blank" rel="noopener">link</a>`);
+
 function card(p) {
-  const div = document.createElement("div");
+  const div = document.createElement("article");
   div.className = "card" + (seen.has(p.id) ? " seen" : "");
   const parts = Object.entries(p.parts || {}).map(([a, b]) => `${a} ${b}`).join(" · ");
-  const media = (p.media || []).length ? ` · ${[...new Set(p.media)].join(", ")}` : "";
+  const media = [...new Set(p.media || [])].map((m) => (m === "photo" ? "photo" : "video")).filter((v, i, a) => a.indexOf(v) === i);
+  const sub = [`@${esc(p.author.handle)}`, `${k(p.author.followers)} followers`, age(p.age_min), ...media].join(" · ");
+  const name = (p.author.name || p.author.handle).replace(/\s*\(.*?\)\s*/g, " ").trim();
   div.innerHTML = `
-    <div class="card-head">
-      <span class="who">${esc(p.author.name)} @${esc(p.author.handle)}</span>
-      <span>${k(p.author.followers)} fol · ${age(p.age_min)}${media}</span>
-      <span class="score ${p.label}" title="${esc(parts)}">${p.score}</span>
+    <header class="card-head">
+      <span class="avatar" style="--h:${hue(p.author.handle || "x")}">${esc((name[0] || "?").toUpperCase())}</span>
+      <div class="who"><b title="${esc(p.author.name)}">${esc(name)}</b><span>${sub}</span></div>
+      <span class="score ${p.label}" title="virality score · ${esc(parts)}">${p.score}</span>
+    </header>
+    ${p.why ? `<p class="why">${esc(p.why)}</p>` : ""}
+    <div class="body">
+      <p class="text">${richText(p.text)}</p>
+      ${p.quoted ? `<p class="quoted">${richText(p.quoted.slice(0, 400))}</p>` : ""}
     </div>
-    <div class="text">${esc(p.text)}</div>
-    ${p.quoted ? `<div class="quoted">${esc(p.quoted.slice(0, 280))}</div>` : ""}
-    ${p.why ? `<div class="why">${esc(p.why)}</div>` : ""}
-    ${p.angle ? `<div class="angle">↳ ${esc(p.angle)} <button class="link copy">copy</button></div>` : ""}
-    <div class="metrics">
-      <span>👁 ${k(p.views)}</span><span>♥ ${k(p.likes)}</span><span>💬 ${k(p.replies)}</span>
-      <span>⟲ ${k(p.reposts)}</span><span>🔖 ${k(p.bookmarks)}</span>
-    </div>
-    <div class="card-foot">
-      <a href="${p.url}" target="_blank" rel="noopener">Open on X ↗</a>
-      ${p.q ? `<span class="q">depth ${p.q}/5</span>` : ""}
-      <button class="link seen-btn" style="margin-left:auto">${seen.has(p.id) ? "unmark" : "seen"}</button>
-    </div>`;
-  div.querySelector(".text").onclick = (e) => e.currentTarget.classList.toggle("open");
+    ${p.angle ? `<div class="angle"><span class="angle-label">Reply angle</span><span class="angle-text">${esc(p.angle)}</span><button class="link copy" title="Copy angle">copy</button></div>` : ""}
+    <footer class="card-foot">
+      <span class="metrics">
+        <span title="views">${icon("views")}${k(p.views)}</span>
+        <span title="likes">${icon("likes")}${k(p.likes)}</span>
+        <span title="replies">${icon("replies")}${k(p.replies)}</span>
+        <span title="reposts">${icon("reposts")}${k(p.reposts)}</span>
+        <span title="bookmarks">${icon("bookmarks")}${k(p.bookmarks)}</span>
+      </span>
+      ${p.q ? `<span class="depth" title="depth / quality by Claude">${"●".repeat(p.q)}<i>${"●".repeat(5 - p.q)}</i></span>` : ""}
+      <button class="link seen-btn">${seen.has(p.id) ? "unmark" : "seen"}</button>
+      <a class="open" href="${p.url}" target="_blank" rel="noopener">Open ↗</a>
+    </footer>`;
+  const body = div.querySelector(".body");
+  body.onclick = (e) => { if (e.target.tagName !== "A") body.classList.toggle("open"); };
   div.querySelector(".seen-btn").onclick = () => { seen.toggle(p.id); renderBoard(); };
   const copy = div.querySelector(".copy");
   if (copy) copy.onclick = () => navigator.clipboard.writeText(p.angle).then(() => (copy.textContent = "copied"));
@@ -73,20 +94,21 @@ function renderBoard() {
   const tout = (c ? c.output_tokens : 0) + (qg ? qg.output_tokens : 0);
   const usd = (c ? c.cost_usd_equiv : 0) + (qg ? qg.cost_usd_equiv : 0);
   const mins = (x) => x == null ? null : x < 60 ? `${x}s` : `${Math.floor(x / 60)}m ${x % 60}s`;
-  const stat = (v, label, cls = "") => v == null ? "" : `<div class="stat ${cls}"><b>${v}</b><span>${label}</span></div>`;
+  const item = (v, label, cls = "") => v == null ? "" : `<span class="${cls}"><b>${v}</b> ${label}</span>`;
+  const when = new Date(current.started_at);
   $("meta").innerHTML = [
-    stat(new Date(current.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), new Date(current.started_at).toLocaleDateString([], { month: "short", day: "numeric" })),
-    stat(s.scraped, "posts scraped"),
-    stat(s.sent, "sent to Claude"),
-    c || qg ? stat(`${k(tin)} / ${k(tout)}`, "tokens in / out") : "",
-    c || qg ? stat(`$${usd.toFixed(2)}`, "API-price equiv") : "",
-    stat(mins(s.scrape_s), "scraping"),
-    stat(c ? mins(Math.round(c.duration_s)) : null, "Claude"),
-    stat(mins(s.total_s), "total"),
-    s.reanalyzed_from ? stat(`#${s.reanalyzed_from}`, "re-analysis of") : "",
-    s.claude_error ? stat("Claude failed", "local ranking shown", "error") : "",
-    s.error ? stat(esc(s.error).slice(0, 60), "error", "error") : "",
-  ].join("");
+    item(when.toLocaleDateString([], { month: "short", day: "numeric" }) + ", " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), ""),
+    item(s.scraped, "scraped"),
+    item(s.sent, "sent to Claude"),
+    c || qg ? item(`${k(tin)} / ${k(tout)}`, "tokens in / out") : "",
+    c || qg ? item(`$${usd.toFixed(2)}`, "at API prices") : "",
+    item(mins(s.scrape_s), "scraping"),
+    item(c ? mins(Math.round(c.duration_s)) : null, "Claude"),
+    item(mins(s.total_s), "total"),
+    s.reanalyzed_from ? item(`#${s.reanalyzed_from}`, "re-analysis of") : "",
+    s.claude_error ? item("Claude failed", "local ranking shown", "error") : "",
+    s.error ? item(esc(s.error).slice(0, 80), "", "error") : "",
+  ].filter(Boolean).join("");
   if (!result) return;
 
   if (!result.find((t) => t.topic === activeTopic)) activeTopic = result[0] && result[0].topic;
@@ -102,9 +124,9 @@ function renderBoard() {
   for (const [key, title, sub] of COLS) {
     const col = document.createElement("section");
     col.className = "col";
-    col.innerHTML = `<h2>${title} <span class="sub">${sub}</span></h2>`;
     const items = t[key] || [];
-    if (!items.length) col.insertAdjacentHTML("beforeend", `<div class="none">nothing here</div>`);
+    col.innerHTML = `<h2 class="col-${key}">${title}<span class="n">${items.length}</span><span class="sub">${sub}</span></h2>`;
+    if (!items.length) col.insertAdjacentHTML("beforeend", `<div class="none">Nothing worth it in this run</div>`);
     items.forEach((p) => col.appendChild(card(p)));
     board.appendChild(col);
   }
@@ -142,7 +164,7 @@ async function refresh() {
     const busy = s.running || s.login === "waiting" || s.login === "checking";
     ["runBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
     $("reBtn").disabled = busy || !(current && current.has_candidates);
-    $("progress").classList.toggle("hidden", !s.running && !(s.log || []).length);
+    $("progress").classList.toggle("hidden", !s.running && !logOpen);
     $("step").textContent = s.running ? `${s.step || "starting"}…` : "Last run finished";
     document.querySelector(".spinner").style.display = s.running ? "" : "none";
     $("progress").classList.toggle("done", !s.running);
@@ -210,6 +232,7 @@ $("saveBtn").onclick = act(saveSettings);
 $("addTopic").onclick = () => document.querySelectorAll(".topic-row").length < 5 && $("topics").appendChild(topicRow());
 $("runSelect").onchange = (e) => loadRun(e.target.value);
 $("logToggle").onclick = () => $("log").classList.toggle("hidden");
+$("logBtn").onclick = () => { logOpen = !logOpen; $("log").classList.toggle("hidden", !logOpen); refresh(); };
 
 loadRuns();
 loop();
