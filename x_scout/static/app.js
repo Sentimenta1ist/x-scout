@@ -60,6 +60,7 @@ function card(p) {
       <span class="score ${p.label}" title="virality score · ${esc(parts)}">${p.score}</span>
     </header>
     ${p.why ? `<p class="why">${esc(p.why)}</p>` : ""}
+    ${p.gist ? `<p class="gist">${esc(p.gist)}</p>` : ""}
     <div class="body">
       <p class="text">${richText(p.text)}</p>
       ${p.quoted ? `<p class="quoted">${richText(p.quoted.slice(0, 400))}</p>` : ""}
@@ -206,7 +207,7 @@ async function openSettings() {
   $("topics").innerHTML = "";
   s.topics.forEach((t) => $("topics").appendChild(topicRow(t)));
   $("lang").value = s.lang; $("perMode").value = s.per_mode; $("cands").value = s.candidates;
-  $("model").value = s.model; $("headless").checked = s.headless;
+  $("model").value = s.model; $("headless").checked = s.headless; $("gistLang").value = s.gist_lang;
   $("profile").value = p.text;
   $("saveMsg").textContent = p.custom ? "" : "Profile is the example: edit it to describe yourself.";
   panel.classList.remove("hidden");
@@ -219,7 +220,7 @@ async function saveSettings() {
   if (topics.length > 5) return ($("saveMsg").textContent = "Max 5 topics.");
   await post("/api/settings", {
     topics, lang: $("lang").value.trim(), per_mode: +$("perMode").value || 30, candidates: +$("cands").value || 25,
-    model: $("model").value, headless: $("headless").checked,
+    model: $("model").value, headless: $("headless").checked, gist_lang: $("gistLang").value.trim() || "English",
   });
   await post("/api/profile", { text: $("profile").value });
   $("saveMsg").textContent = "Saved.";

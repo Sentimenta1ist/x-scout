@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "candidates": 40,        # posts per topic sent to Claude
     "headless": True,
     "model": "sonnet",
+    "gist_lang": "English",  # language of the short per-post summary
 }
 MAX_TOPICS = 5
 
@@ -85,7 +86,7 @@ def fallback_columns(candidates):
 def analyze_candidates(candidates, settings):
     prompt, index = analyze.digest(load_profile(), candidates)
     _log(f"claude -p ({settings['model']}): {sum(len(v) for v in candidates.values())} posts, ~{len(prompt) // 4} tokens of input")
-    data, usage = analyze.run_claude(prompt, model=settings["model"])
+    data, usage = analyze.run_claude(prompt, model=settings["model"], system=analyze.ranking_system(settings["gist_lang"]))
     _log(f"claude done: in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
     return analyze.assemble(data, index, candidates), usage
 

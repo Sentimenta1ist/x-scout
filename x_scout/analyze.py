@@ -22,10 +22,15 @@ U useful: most valuable for the reader given the profile: practical insight, too
 Each post goes into ONE list only: the one where it matters most. Skip spam, giveaways, engagement bait, shallow hype, ads, off-topic posts.
 Output plain text only, no markdown, exactly this format:
 # <topic name as given>
-H <n> <q> | <why> | <angle>
-G <n> <q> | <why>
-U <n> <q> | <why> | <angle>
-q = depth/quality 1-5. why: <=12 words, concrete, no filler. angle: <=14 words reply direction for the reader; leave empty if a reply makes no sense."""
+H <n> <q> | <gist> | <why> | <angle>
+G <n> <q> | <gist> | <why>
+U <n> <q> | <gist> | <why> | <angle>
+q = depth/quality 1-5. gist: what the post says, 1-2 short sentences in {gist_lang}, so the reader can skip the full text; keep key numbers and names.
+why: <=12 words, concrete, no filler. angle: <=14 words reply direction for the reader; leave empty if a reply makes no sense."""
+
+
+def ranking_system(gist_lang="English"):
+    return SYSTEM.replace("{gist_lang}", gist_lang or "English")
 
 
 def _k(n):
@@ -125,11 +130,11 @@ def generate_queries(profile, names, model=None):
     return out, usage
 
 
-def run_claude(prompt, model=None, timeout=600, system=SYSTEM, raw=False):
+def run_claude(prompt, model=None, timeout=600, system=None, raw=False):
     cmd = [
         config.claude_bin(), "-p",
         "--model", model or config.CLAUDE_MODEL,
-        "--system-prompt", system,
+        "--system-prompt", system or ranking_system(),
         "--tools", "",
         "--strict-mcp-config",
         "--setting-sources", "",
@@ -159,7 +164,7 @@ _COL = {"H": "hot", "G": "global", "U": "useful"}
 
 
 def parse_picks(text):
-    """Line format from SYSTEM → {"topics": [{"topic", "hot": [{n, q, why, angle}], ...}]}.
+    """Line format from SYSTEM → {"topics": [{"topic", "hot": [{n, q, gist, why, angle}], ...}]}.
     Plain lines instead of --json-schema: structured output costs a second model turn that re-reads the whole prompt."""
     topics, cur = [], None
     for raw in text.splitlines():
@@ -173,8 +178,9 @@ def parse_picks(text):
             continue
         col, n, q, rest = m.groups()
         fields = [f.strip() for f in rest.split("|")]
-        cur[_COL[col]].append({"n": int(n), "q": int(q) if q else None, "why": fields[0] if fields else "",
-                               "angle": fields[1] if len(fields) > 1 else ""})
+        fields += [""] * (3 - len(fields))
+        cur[_COL[col]].append({"n": int(n), "q": int(q) if q else None, "gist": fields[0], "why": fields[1],
+                               "angle": fields[2]})
     return {"topics": topics}
 
 
@@ -194,7 +200,7 @@ def assemble(claude_data, index, topics):
                 if not p or id(p) not in allowed or p["id"] in seen:
                     continue
                 seen.add(p["id"])
-                items.append({**slim(p), "why": pick.get("why", ""), "angle": pick.get("angle") or "", "q": pick.get("q")})
+                items.append({**slim(p), "gist": pick.get("gist", ""), "why": pick.get("why", ""), "angle": pick.get("angle") or "", "q": pick.get("q")})
             cols[col] = items[:7]
         result.append({"topic": name, "candidates": len(posts), **cols})
     return result

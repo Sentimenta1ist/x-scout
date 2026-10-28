@@ -29,7 +29,7 @@ Scrolling X to find posts worth reading or replying to eats an hour a day. Brows
 | <img src="docs/icons/globe.svg" width="16" height="16" align="top"> **Global** | The most important posts of the day: launches, news, big debates. |
 | <img src="docs/icons/target.svg" width="16" height="16" align="top"> **For me** | Useful for *your* work, based on a short profile you write: tools, techniques, people asking for help, builders worth knowing. |
 
-Every card has Claude's one-line take, a suggested **reply angle** (copy button), a 1–5 depth rating, the post metrics and a link to open it on X.
+Every card has Claude's one-line take, a 1–2 sentence summary of the post (in a language you pick), a suggested **reply angle** (copy button), a 1–5 depth rating, the post metrics and a link to open it on X.
 
 ## Features
 
@@ -111,6 +111,7 @@ X_SCOUT_DATA=./demo-data uv run x-scout
 | Posts per tab | 40 | Posts collected from **Top** and from **Latest** for each topic. |
 | Candidates per topic | 40 | How many of the best-scored posts go to Claude. Main token knob. |
 | Model | `sonnet` | `haiku` is cheaper, `opus` is more thorough. |
+| Summary language | `English` | Language of the short per-post summary, e.g. `Russian`. |
 | Headless | on | Turn off to watch the browser work. |
 
 Optional `.env` (see [`.env.example`](.env.example)): `PORT`, `CLAUDE_BIN`, `CLAUDE_MODEL`, `X_SCOUT_DATA`.

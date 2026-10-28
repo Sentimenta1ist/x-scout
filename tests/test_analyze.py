@@ -1,12 +1,12 @@
-from x_scout.analyze import assemble, parse_picks, select_candidates
+from x_scout.analyze import assemble, parse_picks, ranking_system, select_candidates
 
 REPLY = """# AI agents
-H 3 4 | young MCP post, fast | ask about auth
-G 1 5 | big launch
-U 2 3 | lead: invoice automation | offer PDF → sheet flow
+H 3 4 | автор выпустил MCP-сервер | young MCP post, fast | ask about auth
+G 1 5 | крупный запуск | big launch
+U 2 3 | ищет, как разбирать счета | lead: invoice automation | offer PDF → sheet flow
 junk line
 # Crypto
-H #9 2 | wrong topic index | x
+H #9 2 | g | wrong topic index | x
 """
 
 
@@ -20,8 +20,9 @@ def test_parse_picks():
     d = parse_picks(REPLY)
     agents = d["topics"][0]
     assert agents["topic"] == "AI agents"
-    assert agents["hot"] == [{"n": 3, "q": 4, "why": "young MCP post, fast", "angle": "ask about auth"}]
-    assert agents["global"][0]["angle"] == ""
+    assert agents["hot"] == [{"n": 3, "q": 4, "gist": "автор выпустил MCP-сервер", "why": "young MCP post, fast",
+                              "angle": "ask about auth"}]
+    assert agents["global"][0] == {"n": 1, "q": 5, "gist": "крупный запуск", "why": "big launch", "angle": ""}
     assert agents["useful"][0]["angle"] == "offer PDF → sheet flow"
     assert d["topics"][1]["hot"][0]["n"] == 9
 
@@ -33,6 +34,7 @@ def test_assemble_maps_index_and_rejects_cross_topic():
     res = assemble(parse_picks(REPLY), index, {"AI agents": a, "Crypto": c})
     assert [p["id"] for p in res[0]["hot"]] == ["3"]
     assert res[0]["useful"][0]["why"].startswith("lead")
+    assert res[0]["hot"][0]["gist"] == "автор выпустил MCP-сервер"
     assert res[1]["hot"] == []  # n=9 not in index → dropped
 
 
@@ -49,7 +51,12 @@ def test_select_candidates_filters_and_dedupes():
 
 def test_assemble_keeps_post_in_one_column():
     a = [_post("1"), _post("2")]
-    reply = "# T\nH 1 4 | a | x\nG 1 4 | a again\nG 2 3 | b\nU 1 4 | a third | y\n"
+    reply = "# T\nH 1 4 | g | a | x\nG 1 4 | g | a again\nG 2 3 | g | b\nU 1 4 | g | a third | y\n"
     res = assemble(parse_picks(reply), {1: a[0], 2: a[1]}, {"T": a})[0]
     assert [p["id"] for p in res["hot"]] == ["1"]
     assert res["useful"] == [] and [p["id"] for p in res["global"]] == ["2"]
+
+
+def test_ranking_system_sets_gist_language():
+    assert "in Russian" in ranking_system("Russian")
+    assert "in English" in ranking_system("")
