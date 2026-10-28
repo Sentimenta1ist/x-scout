@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X Scout</title>
+  <meta name="description" content="A local app that turns X search into a daily briefing for up to 5 topics: what is taking off, what everyone talks about, and what is useful to you. Ranked by Claude in one cheap call.">
+  <meta property="og:title" content="X Scout">
+  <meta property="og:description" content="Your daily X briefing for up to 5 topics, ranked by Claude. Runs locally.">
+  <meta property="og:image" content="https://sentimenta1ist.github.io/x-scout/img/board-dark.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+    :root {
+      --bg: #f5f4f0; --panel: #fff; --text: #17171b; --text-2: #45454d; --muted: #74747d; --line: #e6e4de;
+      --accent: #1d5bd8; --accent-bg: #eef3fd; --hot: #d9480f; --good: #2b8a3e;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --bg: #0f0f12; --panel: #18181d; --text: #ececf1; --text-2: #c4c4cc; --muted: #8b8b96; --line: #26262e; --accent: #7aa5ff; --accent-bg: #1a2233; --hot: #ff7a45; --good: #5cc775; }
+    }
+    :root[data-theme="dark"] { --bg: #0f0f12; --panel: #18181d; --text: #ececf1; --text-2: #c4c4cc; --muted: #8b8b96; --line: #26262e; --accent: #7aa5ff; --accent-bg: #1a2233; --hot: #ff7a45; --good: #5cc775; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+    nav { display: flex; align-items: center; gap: 18px; padding: 18px 0; }
+    nav .brand { font-weight: 800; font-size: 18px; letter-spacing: -.02em; margin-right: auto; }
+    nav a { text-decoration: none; color: var(--muted); font-size: 14px; }
+    nav a:hover { color: var(--text); }
+    .hero { padding: 48px 0 28px; text-align: center; }
+    .hero h1 { font-size: clamp(32px, 5.5vw, 54px); line-height: 1.08; letter-spacing: -.03em; margin: 0 auto 16px; max-width: 820px; }
+    .hero p { font-size: 18px; color: var(--text-2); max-width: 660px; margin: 0 auto 26px; }
+    .cta { display: inline-flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .btn { display: inline-block; padding: 11px 20px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); color: var(--text); background: var(--panel); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .shot { margin: 34px auto 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,.18); }
+    .shot img { display: block; width: 100%; }
+    section { padding: 56px 0 8px; }
+    h2 { font-size: 28px; letter-spacing: -.02em; margin: 0 0 8px; }
+    .lead { color: var(--text-2); margin: 0 0 24px; max-width: 700px; }
+    .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+    .card h3 { margin: 0 0 6px; font-size: 17px; display: flex; gap: 8px; align-items: center; }
+    .card p { margin: 0; color: var(--text-2); font-size: 15px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .steps { counter-reset: s; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .steps .card::before { counter-increment: s; content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-bg); color: var(--accent); font-weight: 700; font-size: 14px; margin-bottom: 10px; }
+    code, pre { font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    pre { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; overflow-x: auto; margin: 0 0 14px; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 15px; }
+    th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 600; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+    td.num { font-variant-numeric: tabular-nums; }
+    .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .duo img { width: 100%; display: block; border-radius: 12px; border: 1px solid var(--line); }
+    .duo figcaption { color: var(--muted); font-size: 13px; text-align: center; margin-top: 6px; }
+    figure { margin: 0; }
+    footer { padding: 56px 0 40px; color: var(--muted); font-size: 14px; text-align: center; }
+    @media (max-width: 820px) {
+      .cols, .steps, .duo { grid-template-columns: 1fr; }
+      nav a.hide-sm { display: none; }
+      .hero { padding-top: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <span class="brand">X Scout</span>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#start">Quick start</a>
+      <a href="https://github.com/Sentimenta1ist/x-scout">GitHub</a>
+    </nav>
+
+    <header class="hero">
+      <h1>Your daily X briefing, ranked by Claude</h1>
+      <p>Pick up to 5 topics. X Scout searches X in a real browser, scores every post for early virality and asks Claude, in one cheap call, what is taking off, what matters today and what is useful to <em>you</em>.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/Sentimenta1ist/x-scout">View on GitHub</a>
+        <a class="btn" href="#start">Quick start</a>
+      </div>
+      <div class="shot"><img src="img/board-dark.png" alt="X Scout board with Hot, Global and For me columns"></div>
+    </header>
+
+    <section>
+      <h2>Three columns per topic</h2>
+      <p class="lead">3–6 posts each, with Claude's one-line take, a suggested reply angle and a depth rating. Mark posts as seen while you go.</p>
+      <div class="cols">
+        <div class="card"><h3><span class="dot" style="background:var(--hot)"></span>Hot</h3><p>Young posts that are taking off right now. Reply early and ride the reach.</p></div>
+        <div class="card"><h3><span class="dot" style="background:var(--accent)"></span>Global</h3><p>The most important posts of the day: launches, news and big debates, so you stay in the loop.</p></div>
+        <div class="card"><h3><span class="dot" style="background:var(--good)"></span>For me</h3><p>Useful for your work, based on a short profile you write: tools, techniques, people asking for help.</p></div>
+      </div>
+    </section>
+
+    <section id="how">
+      <h2>How it works</h2>
+      <p class="lead">No DOM scraping, no screenshots, no clicks. Most of the work is done locally for free; Claude only sees the shortlist.</p>
+      <div class="steps">
+        <div class="card"><h3>Search like a person</h3><p>Playwright drives your Google Chrome and reads X's own search JSON, Top and Latest, with randomized pauses.</p></div>
+        <div class="card"><h3>Score locally</h3><p>Projected views, engagement per view, reach vs the author's usual level, acceleration between runs.</p></div>
+        <div class="card"><h3>One Claude call</h3><p>The best ~40 posts per topic go to <code>claude -p</code> as one compact line each.</p></div>
+        <div class="card"><h3>Read and reply</h3><p>Three columns per topic, a reply angle you can copy, a link to open the post on X.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Built to be cheap on tokens</h2>
+      <p class="lead">A short custom system prompt, no tools, no settings, an empty working dir, and a line-based answer instead of a JSON schema (which costs a second model turn).</p>
+      <table>
+        <tr><th>Output format, 3 topics × 25 posts, Sonnet</th><th>Input</th><th>Output</th><th>Time</th></tr>
+        <tr><td><code>--json-schema</code></td><td class="num">15.0k</td><td class="num">4.9k</td><td class="num">33 s</td></tr>
+        <tr><td>line format (used)</td><td class="num">6.0k</td><td class="num">1.6k</td><td class="num">15 s</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <div class="duo">
+        <figure><img src="img/running.png" alt="Run in progress with progress bar and log"><figcaption>Progress bar with ETA and a live log</figcaption></figure>
+        <figure><img src="img/settings.png" alt="Settings panel"><figcaption>Topics, queries, limits and your profile</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="start">
+      <h2>Quick start</h2>
+      <p class="lead">macOS or Linux with Google Chrome, <a href="https://docs.astral.sh/uv/">uv</a> and a logged-in <a href="https://claude.com/claude-code">Claude Code</a> CLI.</p>
+      <pre><code>git clone https://github.com/Sentimenta1ist/x-scout.git
+cd x-scout
+./run</code></pre>
+      <p class="lead">Log in to X once in the window that opens (a secondary account is a good idea), add your topics, press <b>Run</b>. No X account yet? Try the demo data:</p>
+      <pre><code>X_SCOUT_DATA=./demo-data uv run python scripts/demo.py
+X_SCOUT_DATA=./demo-data uv run x-scout</code></pre>
+    </section>
+
+    <footer>
+      MIT licensed · Everything runs on your machine · Not affiliated with X Corp. or Anthropic<br>
+      <a href="https://github.com/Sentimenta1ist/x-scout">github.com/Sentimenta1ist/x-scout</a>
+    </footer>
+  </div>
+</body>
+</html>

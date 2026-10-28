@@ -3,6 +3,9 @@ name = "x-scout"
 version = "0.1.0"
 description = "Local X (Twitter) topic scout: real-browser search, virality scoring, Claude ranking"
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "Alexander Ivanenko" }]
+keywords = ["twitter", "x", "scraper", "playwright", "claude", "claude-code", "virality"]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.162.0",
@@ -10,6 +13,10 @@ dependencies = [
     "python-dotenv>=1.2.4",
     "uvicorn[standard]>=0.54.0",
 ]
+
+[project.urls]
+Homepage = "https://sentimenta1ist.github.io/x-scout/"
+Repository = "https://github.com/Sentimenta1ist/x-scout"
 
 [project.scripts]
 x-scout = "x_scout.app:main"
