@@ -1,4 +1,4 @@
-from x_scout.analyze import assemble, parse_picks, ranking_system, select_candidates
+from x_scout.analyze import assemble, parse_picks, presplit, ranking_system, select_candidates
 
 REPLY = """# AI agents
 H 3 4 | автор выпустил MCP-сервер | young MCP post, fast | ask about auth
@@ -10,10 +10,10 @@ H #9 2 | g | wrong topic index | x
 """
 
 
-def _post(pid, views=5000, age=60, score=50):
+def _post(pid, views=5000, age=60, score=50, label="normal"):
     return {"id": pid, "url": "u", "text": f"post number {pid} with some text", "author": {"handle": "a", "name": "A", "followers": 1000},
             "views": views, "likes": 50, "replies": 5, "reposts": 5, "bookmarks": 5, "age_min": age,
-            "scored": {"score": score, "label": "normal", "parts": {}}}
+            "scored": {"score": score, "label": label, "parts": {}}}
 
 
 def test_parse_picks():
@@ -28,14 +28,29 @@ def test_parse_picks():
 
 
 def test_assemble_maps_index_and_rejects_cross_topic():
-    a = [_post("1"), _post("2"), _post("3")]
-    c = [_post("9")]
+    a = [_post("1", views=9000), _post("2", views=300), _post("3", label="rising")]
+    c = [_post("9", label="hot")]
     index = {1: a[0], 2: a[1], 3: a[2], 4: c[0]}
     res = assemble(parse_picks(REPLY), index, {"AI agents": a, "Crypto": c})
     assert [p["id"] for p in res[0]["hot"]] == ["3"]
+    assert [p["id"] for p in res[0]["global"]] == ["1"]
     assert res[0]["useful"][0]["why"].startswith("lead")
     assert res[0]["hot"][0]["gist"] == "автор выпустил MCP-сервер"
     assert res[1]["hot"] == []  # n=9 not in index → dropped
+
+
+def test_presplit_hot_by_radar_label_global_by_views():
+    posts = [_post("old-big", views=80000, label="old"), _post("rising", views=900, score=55, label="rising"),
+             _post("hot", views=20000, score=80, label="hot"), _post("small", views=400)]
+    assert presplit(posts, global_min_views=5000) == {"hot": "H", "rising": "H", "old-big": "G"}
+
+
+def test_assemble_rejects_claude_picks_outside_numbers():
+    a = [_post("1", views=300), _post("2", views=300)]
+    reply = "# T\nH 1 4 | g | not rising | x\nG 2 4 | g | not big\nU 1 4 | g | fine | y\n"
+    res = assemble(parse_picks(reply), {1: a[0], 2: a[1]}, {"T": a})[0]
+    assert res["hot"] == [] and res["global"] == []
+    assert [p["id"] for p in res["useful"]] == ["1"]
 
 
 def test_select_candidates_filters_and_dedupes():
@@ -50,11 +65,11 @@ def test_select_candidates_filters_and_dedupes():
 
 
 def test_assemble_keeps_post_in_one_column():
-    a = [_post("1"), _post("2")]
-    reply = "# T\nH 1 4 | g | a | x\nG 1 4 | g | a again\nG 2 3 | g | b\nU 1 4 | g | a third | y\n"
+    a = [_post("1", label="hot"), _post("2", views=300)]
+    reply = "# T\nH 1 4 | g | a | x\nG 1 4 | g | a again\nU 1 4 | g | a third | y\nU 2 3 | g | b | z\n"
     res = assemble(parse_picks(reply), {1: a[0], 2: a[1]}, {"T": a})[0]
     assert [p["id"] for p in res["hot"]] == ["1"]
-    assert res["useful"] == [] and [p["id"] for p in res["global"]] == ["2"]
+    assert res["global"] == [] and [p["id"] for p in res["useful"]] == ["2"]
 
 
 def test_ranking_system_sets_gist_language():

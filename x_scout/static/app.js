@@ -207,7 +207,7 @@ async function openSettings() {
   $("topics").innerHTML = "";
   s.topics.forEach((t) => $("topics").appendChild(topicRow(t)));
   $("lang").value = s.lang; $("perMode").value = s.per_mode; $("cands").value = s.candidates;
-  $("model").value = s.model; $("headless").checked = s.headless; $("gistLang").value = s.gist_lang;
+  $("model").value = s.model; $("headless").checked = s.headless; $("gistLang").value = s.gist_lang; $("globalMin").value = s.global_min_views;
   $("profile").value = p.text;
   $("saveMsg").textContent = p.custom ? "" : "Profile is the example: edit it to describe yourself.";
   panel.classList.remove("hidden");
@@ -221,6 +221,7 @@ async function saveSettings() {
   await post("/api/settings", {
     topics, lang: $("lang").value.trim(), per_mode: +$("perMode").value || 30, candidates: +$("cands").value || 25,
     model: $("model").value, headless: $("headless").checked, gist_lang: $("gistLang").value.trim() || "English",
+    global_min_views: +$("globalMin").value || 5000,
   });
   await post("/api/profile", { text: $("profile").value });
   $("saveMsg").textContent = "Saved.";

@@ -12,14 +12,15 @@ import subprocess
 from . import config
 from .parse import compact_text
 
-SYSTEM = """You rank X (Twitter) posts for one reader. Input: reader profile, then posts grouped by topic.
-Post line: n|author|followers|age|views|likes|replies|reposts|bookmarks|score|text
+SYSTEM = """You review X (Twitter) posts for one reader. Input: reader profile, then posts grouped by topic.
+Post line: n|tag|author|followers|age|views|likes|replies|reposts|bookmarks|score|text
 score = local early-virality score 0-100 (velocity vs age and vs author's usual reach). [img]/[vid] = media, QT = quoted post.
-For every topic pick three lists, 3-6 posts each (at least 3 whenever the topic has anything decent), best first, only from that topic's posts:
-H hot: likely to keep growing fast right now (young, accelerating, high score) AND worth reading; good to reply early.
-G global: the most important/popular posts of the day to stay informed (news, launches, big debates). Substance over memes.
-U useful: most valuable for the reader given the profile: practical insight, tools, techniques, leads, people worth knowing.
-Each post goes into ONE list only: the one where it matters most. Skip spam, giveaways, engagement bait, shallow hype, ads, off-topic posts.
+tag is set by the numbers, not by you: H = rising fast right now, G = one of the biggest posts of the day, - = neither.
+For every topic:
+H and G: output one line for each tagged post, with its own tag. Omit the post if it is spam, a giveaway, engagement bait,
+an ad, or off-topic for the topic name. Do not move posts between H and G.
+U: from untagged posts pick 0-6 that are genuinely valuable for the reader given the profile AND fit the topic name:
+practical insight, tools, techniques, leads, people worth knowing. Fewer is better than filler, zero is fine.
 Output plain text only, no markdown, exactly this format:
 # <topic name as given>
 H <n> <q> | <gist> | <why> | <angle>
@@ -87,12 +88,23 @@ def select_candidates(posts, limit=25, max_age_h=36):
     return picked
 
 
-def digest(profile, by_topic):
+def presplit(posts, global_min_views=5000, limit=6):
+    """Hot and Global are decided by numbers: radar label for Hot, absolute reach for Global. {post id: "H" | "G"}."""
+    hot = sorted((p for p in posts if p["scored"]["label"] in ("hot", "rising")),
+                 key=lambda p: p["scored"]["score"], reverse=True)[:limit]
+    taken = {p["id"] for p in hot}
+    big = sorted((p for p in posts if p["id"] not in taken and (p.get("views") or 0) >= global_min_views),
+                 key=lambda p: p["views"], reverse=True)[:limit]
+    return {**{p["id"]: "H" for p in hot}, **{p["id"]: "G" for p in big}}
+
+
+def digest(profile, by_topic, global_min_views=5000):
     """by_topic: {topic: [candidate posts]} → (prompt text, index → post)."""
     lines = ["PROFILE:", profile.strip(), ""]
     index, n = {}, 0
     for topic, posts in by_topic.items():
         lines.append(f"## TOPIC: {topic}")
+        tags = presplit(posts, global_min_views)
         for p in posts:
             n += 1
             index[n] = p
@@ -102,7 +114,7 @@ def digest(profile, by_topic):
                 text += f" QT {compact_text(p['quoted'], 200)}"
             a = p["author"]
             lines.append("|".join([
-                str(n), "@" + a["handle"], _k(a["followers"]), _age(p["age_min"]), _k(p["views"]), _k(p["likes"]),
+                str(n), tags.get(p["id"], "-"), "@" + a["handle"], _k(a["followers"]), _age(p["age_min"]), _k(p["views"]), _k(p["likes"]),
                 _k(p["replies"]), _k(p["reposts"]), _k(p["bookmarks"]), str(p["scored"]["score"]), media + text,
             ]))
         lines.append("")
@@ -184,24 +196,30 @@ def parse_picks(text):
     return {"topics": topics}
 
 
-def assemble(claude_data, index, topics):
-    """Map Claude's picks (by local index) back to full posts. Drops picks that point outside the topic."""
+def assemble(claude_data, index, topics, global_min_views=5000):
+    """Map Claude's picks (by local index) back to full posts. Hot/Global keep only posts the numbers tagged
+    (ordered by score / views); Claude can only drop them. Useful takes untagged posts in Claude's order."""
     by_name = {t["topic"].strip().lower(): t for t in claude_data.get("topics", [])}
     result = []
     for name, posts in topics.items():
         allowed = {id(p) for p in posts}
+        tags = presplit(posts, global_min_views)
         t = by_name.get(name.lower(), {})
         cols, seen = {}, set()
-        # a post lives in one column; Claude sometimes repeats it, keep the first by this priority
-        for col in ("hot", "useful", "global"):
+        for col, tag in (("hot", "H"), ("global", "G"), ("useful", None)):
             items = []
             for pick in t.get(col, []):
                 p = index.get(pick.get("n"))
-                if not p or id(p) not in allowed or p["id"] in seen:
+                if not p or id(p) not in allowed or p["id"] in seen or tags.get(p["id"]) != tag:
                     continue
                 seen.add(p["id"])
-                items.append({**slim(p), "gist": pick.get("gist", ""), "why": pick.get("why", ""), "angle": pick.get("angle") or "", "q": pick.get("q")})
-            cols[col] = items[:7]
+                items.append({**slim(p), "gist": pick.get("gist", ""), "why": pick.get("why", ""),
+                              "angle": pick.get("angle") or "", "q": pick.get("q")})
+            if col == "hot":
+                items.sort(key=lambda x: x["score"], reverse=True)
+            elif col == "global":
+                items.sort(key=lambda x: x["views"], reverse=True)
+            cols[col] = items[:6]
         result.append({"topic": name, "candidates": len(posts), **cols})
     return result
 

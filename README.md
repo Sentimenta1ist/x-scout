@@ -111,6 +111,7 @@ X_SCOUT_DATA=./demo-data uv run x-scout
 | Posts per tab | 40 | Posts collected from **Top** and from **Latest** for each topic. |
 | Candidates per topic | 40 | How many of the best-scored posts go to Claude. Main token knob. |
 | Model | `sonnet` | `haiku` is cheaper, `opus` is more thorough. |
+| Global: min views | 5000 | Global column takes only posts with at least this many views. Hot takes only posts the radar labels hot or rising (under 6 h). |
 | Summary language | `English` | Language of the short per-post summary, e.g. `Russian`. |
 | Headless | on | Turn off to watch the browser work. |
 

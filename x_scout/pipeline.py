@@ -17,6 +17,7 @@ DEFAULT_SETTINGS = {
     "headless": True,
     "model": "sonnet",
     "gist_lang": "English",  # language of the short per-post summary
+    "global_min_views": 5000,  # Global column: only posts with at least this many views
 }
 MAX_TOPICS = 5
 
@@ -70,25 +71,24 @@ def score_posts(posts):
     return posts
 
 
-def fallback_columns(candidates):
-    """Used when Claude fails: columns by local numbers only, so the run still shows something."""
+def fallback_columns(candidates, global_min_views=5000):
+    """Used when Claude fails: same Hot/Global split by numbers, no Useful, so the run still shows something."""
     out = []
     for name, posts in candidates.items():
-        hot = sorted([p for p in posts if p["age_min"] <= 360], key=lambda p: p["scored"]["score"], reverse=True)[:5]
-        big = sorted(posts, key=lambda p: p["views"], reverse=True)[:5]
+        tags = analyze.presplit(posts, global_min_views)
+        col = lambda tag, key: sorted([{**analyze.slim(p), "why": "", "angle": "", "q": None}
+                                       for p in posts if tags.get(p["id"]) == tag], key=key, reverse=True)
         out.append({"topic": name, "candidates": len(posts),
-                    "hot": [{**analyze.slim(p), "why": "", "angle": "", "q": None} for p in hot],
-                    "global": [{**analyze.slim(p), "why": "", "angle": "", "q": None} for p in big],
-                    "useful": []})
+                    "hot": col("H", lambda x: x["score"]), "global": col("G", lambda x: x["views"]), "useful": []})
     return out
 
 
 def analyze_candidates(candidates, settings):
-    prompt, index = analyze.digest(load_profile(), candidates)
+    prompt, index = analyze.digest(load_profile(), candidates, settings["global_min_views"])
     _log(f"claude -p ({settings['model']}): {sum(len(v) for v in candidates.values())} posts, ~{len(prompt) // 4} tokens of input")
     data, usage = analyze.run_claude(prompt, model=settings["model"], system=analyze.ranking_system(settings["gist_lang"]))
     _log(f"claude done: in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
-    return analyze.assemble(data, index, candidates), usage
+    return analyze.assemble(data, index, candidates, settings["global_min_views"]), usage
 
 
 def _eta(n_topics):
@@ -144,7 +144,7 @@ async def run(settings):
             stats["claude"] = usage
         except Exception as e:  # keep the scrape, show local ranking
             _log(f"claude failed, showing local ranking: {e}")
-            result, stats["claude_error"] = fallback_columns(candidates), str(e)[:500]
+            result, stats["claude_error"] = fallback_columns(candidates, settings["global_min_views"]), str(e)[:500]
         stats["analyze_s"] = round(time.time() - t0) - stats["scrape_s"]
         stats["total_s"] = round(time.time() - t0)
         db.finish_run(run_id, "done", result, stats)
