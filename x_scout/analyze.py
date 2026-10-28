@@ -1,7 +1,7 @@
 """Pre-filter scraped posts locally, then one `claude -p` call ranks them into three columns per topic.
 
-Token budget is the point: Claude sees ~25 short lines per topic, posts are referenced by a local index
-instead of 19-digit ids, and the CLI runs with a tiny system prompt, no tools, no settings, empty cwd
+Claude sees one compact line per post (~40 per topic), posts are referenced by a local index instead of
+19-digit ids, and the CLI runs with a tiny system prompt, no tools, no settings, empty cwd
 (~1.5k tokens of overhead instead of ~20k for a default Claude Code session).
 """
 import json
@@ -15,11 +15,11 @@ from .parse import compact_text
 SYSTEM = """You rank X (Twitter) posts for one reader. Input: reader profile, then posts grouped by topic.
 Post line: n|author|followers|age|views|likes|replies|reposts|bookmarks|score|text
 score = local early-virality score 0-100 (velocity vs age and vs author's usual reach). [img]/[vid] = media, QT = quoted post.
-For every topic pick three lists, 3-6 posts each, best first, only from that topic's posts:
+For every topic pick three lists, 3-6 posts each (at least 3 whenever the topic has anything decent), best first, only from that topic's posts:
 H hot: likely to keep growing fast right now (young, accelerating, high score) AND worth reading; good to reply early.
 G global: the most important/popular posts of the day to stay informed (news, launches, big debates). Substance over memes.
 U useful: most valuable for the reader given the profile: practical insight, tools, techniques, leads, people worth knowing.
-A post may be in several lists. Skip spam, giveaways, engagement bait, shallow hype, ads, off-topic posts.
+Each post goes into ONE list only: the one where it matters most. Skip spam, giveaways, engagement bait, shallow hype, ads, off-topic posts.
 Output plain text only, no markdown, exactly this format:
 # <topic name as given>
 H <n> <q> | <why> | <angle>
@@ -92,9 +92,9 @@ def digest(profile, by_topic):
             n += 1
             index[n] = p
             media = "".join(f"[{'vid' if m in ('video', 'animated_gif') else 'img'}]" for m in sorted(set(p.get("media") or [])))
-            text = compact_text(p["text"], 280)
+            text = compact_text(p["text"], 500)
             if p.get("quoted"):
-                text += f" QT {compact_text(p['quoted'], 120)}"
+                text += f" QT {compact_text(p['quoted'], 200)}"
             a = p["author"]
             lines.append("|".join([
                 str(n), "@" + a["handle"], _k(a["followers"]), _age(p["age_min"]), _k(p["views"]), _k(p["likes"]),
@@ -104,11 +104,32 @@ def digest(profile, by_topic):
     return "\n".join(lines), index
 
 
-def run_claude(prompt, model=None, timeout=600):
+QUERY_SYSTEM = """You write X (Twitter) advanced-search queries. Input: reader profile, then topic names, one per line.
+For each topic write ONE query that finds substantive posts the reader would care about: use OR-groups of specific terms
+and quoted phrases, exclude obvious junk (-giveaway -airdrop, price talk where relevant). Max ~200 characters.
+Do not add lang:, filter:, since:, min_faves: (added automatically). Output plain text only, one line per topic:
+<topic name as given> => <query>"""
+
+
+def generate_queries(profile, names, model=None):
+    """Empty topic query → one Claude call writes queries for all such topics. Returns ({name: query}, usage)."""
+    text, usage = run_claude(f"PROFILE:\n{profile.strip()}\n\nTOPICS:\n" + "\n".join(names), model=model,
+                             system=QUERY_SYSTEM, raw=True)
+    out = {}
+    for line in text.splitlines():
+        if "=>" in line:
+            name, q = (x.strip().strip("`") for x in line.split("=>", 1))
+            match = next((n for n in names if n.lower() == name.lower()), None)
+            if match and q:
+                out[match] = q
+    return out, usage
+
+
+def run_claude(prompt, model=None, timeout=600, system=SYSTEM, raw=False):
     cmd = [
         config.claude_bin(), "-p",
         "--model", model or config.CLAUDE_MODEL,
-        "--system-prompt", SYSTEM,
+        "--system-prompt", system,
         "--tools", "",
         "--strict-mcp-config",
         "--setting-sources", "",
@@ -122,7 +143,7 @@ def run_claude(prompt, model=None, timeout=600):
         raise RuntimeError(f"claude -p failed (exit {proc.returncode}): {(proc.stderr or proc.stdout)[-800:]}")
     if out.get("is_error"):
         raise RuntimeError(f"claude -p error: {out.get('result')}")
-    data = parse_picks(out.get("result") or "")
+    data = (out.get("result") or "") if raw else parse_picks(out.get("result") or "")
     u = out.get("usage") or {}
     usage = {
         "input_tokens": u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0),
@@ -164,9 +185,10 @@ def assemble(claude_data, index, topics):
     for name, posts in topics.items():
         allowed = {id(p) for p in posts}
         t = by_name.get(name.lower(), {})
-        cols = {}
-        for col in ("hot", "global", "useful"):
-            seen, items = set(), []
+        cols, seen = {}, set()
+        # a post lives in one column; Claude sometimes repeats it, keep the first by this priority
+        for col in ("hot", "useful", "global"):
+            items = []
             for pick in t.get(col, []):
                 p = index.get(pick.get("n"))
                 if not p or id(p) not in allowed or p["id"] in seen:

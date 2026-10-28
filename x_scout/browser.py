@@ -139,7 +139,7 @@ async def _search_one(page, mode, query, target, log):
     return batch
 
 
-async def scrape(topics, per_mode=30, lang="en", headless=True, log=print):
+async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_step=lambda i, label: None):
     """Returns {topic_name: [post, ...]} with posts deduped within a topic."""
     out = {}
     async with _lock, async_playwright() as pw:
@@ -150,7 +150,9 @@ async def scrape(topics, per_mode=30, lang="en", headless=True, log=print):
                 if i:
                     await asyncio.sleep(random.uniform(8, 15))
                 seen = {}
-                for mode, query in build_queries(topic, lang):
+                for j, (mode, query) in enumerate(build_queries(topic, lang)):
+                    tab = "Top" if mode == "top" else "Latest"
+                    on_step(i * 2 + j, f"{topic['name']}: {tab} (topic {i + 1}/{len(topics)})")
                     log(f"{topic['name']}: searching {mode} — {query}")
                     for p in await _search_one(page, mode, query, per_mode, log):
                         p.setdefault("found_in", mode)

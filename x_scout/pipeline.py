@@ -12,15 +12,19 @@ from .scoring import project_views, score
 DEFAULT_SETTINGS = {
     "topics": [{"name": "AI agents", "query": ""}, {"name": "Automation", "query": ""}],
     "lang": "en",
-    "per_mode": 30,          # posts per search tab (Top and Latest) per topic
-    "candidates": 25,        # posts per topic sent to Claude
+    "per_mode": 40,          # posts per search tab (Top and Latest) per topic
+    "candidates": 40,        # posts per topic sent to Claude
     "headless": True,
     "model": "sonnet",
 }
 MAX_TOPICS = 5
 
 # live state of the current run, polled by the UI
-state = {"running": False, "run_id": None, "step": "", "log": []}
+state = {"running": False, "run_id": None, "step": "", "log": [], "progress": 0.0, "eta_s": None, "started": None}
+
+
+def _progress(done, total, step):
+    state.update(progress=round(min(done / total, 1), 3), step=step)
 
 
 def load_settings():
@@ -86,20 +90,44 @@ def analyze_candidates(candidates, settings):
     return analyze.assemble(data, index, candidates), usage
 
 
+def _eta(n_topics):
+    """Rough duration from the last finished run, scaled by topic count."""
+    for r in db.list_runs(10):
+        s = r.get("stats") or {}
+        if r["status"] == "done" and s.get("total_s") and r.get("topics"):
+            return round(s["total_s"] / len(r["topics"]) * n_topics)
+    return 60 * n_topics
+
+
 async def run(settings):
-    state.update(running=True, step="scraping", log=[])
     topics = settings["topics"][:MAX_TOPICS]
-    run_id = db.create_run(topics)
-    state["run_id"] = run_id
+    state.update(running=True, step="starting", log=[], progress=0.0, eta_s=_eta(len(topics)), started=time.time())
     t0 = time.time()
     stats = {}
+    run_id = db.create_run(topics)
+    state["run_id"] = run_id
     try:
-        scraped = await browser.scrape(topics, per_mode=settings["per_mode"], lang=settings["lang"],
-                                       headless=settings["headless"], log=_log)
+        missing = [t["name"] for t in topics if not (t.get("query") or "").strip()]
+        if missing:
+            _progress(0, 1, "writing search queries")
+            _log(f"no query for {', '.join(missing)}: asking Claude to write them")
+            queries, usage = await asyncio.to_thread(analyze.generate_queries, load_profile(), missing, settings["model"])
+            stats["query_gen"] = usage
+            for t in topics:
+                if t["name"] in queries:
+                    t["query"] = queries[t["name"]]
+                    _log(f"{t['name']} => {t['query']}")
+            save_settings({**settings, "topics": topics})
+
+        searches = len(topics) * 2
+        # scraping ≈ 85% of the bar, analysis the rest
+        scraped = await browser.scrape(
+            topics, per_mode=settings["per_mode"], lang=settings["lang"], headless=settings["headless"], log=_log,
+            on_step=lambda i, label: _progress(i * 0.85, searches, label))
         stats["scraped"] = sum(len(v) for v in scraped.values())
         stats["scrape_s"] = round(time.time() - t0)
 
-        state["step"] = "scoring"
+        _progress(0.86, 1, "scoring")
         candidates = {}
         for name, posts in scraped.items():
             score_posts(posts)
@@ -107,14 +135,16 @@ async def run(settings):
             candidates[name] = analyze.select_candidates(posts, limit=settings["candidates"])
             _log(f"{name}: {len(candidates[name])} candidates of {len(posts)}")
         db.save_candidates(run_id, candidates)
+        stats["sent"] = sum(len(v) for v in candidates.values())
 
-        state["step"] = "analyzing"
+        _progress(0.88, 1, f"Claude is ranking {stats['sent']} posts")
         try:
             result, usage = await asyncio.to_thread(analyze_candidates, candidates, settings)
             stats["claude"] = usage
         except Exception as e:  # keep the scrape, show local ranking
             _log(f"claude failed, showing local ranking: {e}")
             result, stats["claude_error"] = fallback_columns(candidates), str(e)[:500]
+        stats["analyze_s"] = round(time.time() - t0) - stats["scrape_s"]
         stats["total_s"] = round(time.time() - t0)
         db.finish_run(run_id, "done", result, stats)
         _log(f"done in {stats['total_s']}s")
@@ -128,7 +158,7 @@ async def run(settings):
         _log(f"error: {e!r}")
         db.finish_run(run_id, "error", stats={**stats, "error": str(e)[:500]})
     finally:
-        state.update(running=False, step="")
+        state.update(running=False, step="", progress=1.0)
 
 
 async def reanalyze(run_id, settings):
@@ -136,17 +166,19 @@ async def reanalyze(run_id, settings):
     src = db.get_run(run_id)
     if not src or not src.get("candidates"):
         raise ValueError("run has no stored candidates")
-    state.update(running=True, step="analyzing", log=[])
+    state.update(running=True, step="Claude is ranking stored posts", log=[], progress=0.5, eta_s=20, started=time.time())
     new_id = db.create_run(src["topics"])
     state["run_id"] = new_id
     try:
         db.save_candidates(new_id, src["candidates"])
         result, usage = await asyncio.to_thread(analyze_candidates, src["candidates"], settings)
-        db.finish_run(new_id, "done", result, {"claude": usage, "reanalyzed_from": run_id,
-                                               "scraped": src["stats"].get("scraped") if src.get("stats") else None})
+        prev = src.get("stats") or {}
+        db.finish_run(new_id, "done", result, {"claude": usage, "reanalyzed_from": run_id, "scraped": prev.get("scraped"),
+                                               "sent": sum(len(v) for v in src["candidates"].values()),
+                                               "total_s": usage["duration_s"]})
         _log("done")
     except Exception as e:
         _log(f"error: {e!r}")
         db.finish_run(new_id, "error", stats={"error": str(e)[:500]})
     finally:
-        state.update(running=False, step="")
+        state.update(running=False, step="", progress=1.0)

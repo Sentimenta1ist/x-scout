@@ -23,7 +23,12 @@
   </header>
 
   <section id="progress" class="progress hidden">
-    <div class="progress-head"><span class="spinner"></span><b id="step"></b><button id="logToggle" class="link">log</button></div>
+    <div class="progress-head">
+      <span class="spinner"></span><b id="step"></b>
+      <span id="timing" class="hint"></span>
+      <button id="logToggle" class="link">log</button>
+    </div>
+    <div class="bar"><div id="barFill" class="bar-fill"></div></div>
     <pre id="log" class="log hidden"></pre>
   </section>
 
@@ -31,13 +36,13 @@
     <div class="settings-grid">
       <div>
         <h3>Topics <small>(up to 5)</small></h3>
-        <p class="hint">Name is shown in the UI. Query is what goes to X search (any X operators); empty = the name.</p>
+        <p class="hint">Name is shown in the UI. Query is what goes to X search (any X operators). Leave empty and Claude writes one on the next run.</p>
         <div id="topics"></div>
         <button id="addTopic" class="ghost small">+ topic</button>
         <h3>Scraping</h3>
         <label>Language <input id="lang" size="4" placeholder="en"></label>
         <label>Posts per tab (Top / Latest) <input id="perMode" type="number" min="10" max="60"></label>
-        <label>Candidates per topic sent to Claude <input id="cands" type="number" min="10" max="40"></label>
+        <label>Candidates per topic sent to Claude <input id="cands" type="number" min="10" max="60"></label>
         <label>Model <select id="model"><option>sonnet</option><option>haiku</option><option>opus</option></select></label>
         <label class="row"><input id="headless" type="checkbox"> run browser hidden (headless)</label>
       </div>
@@ -53,7 +58,7 @@
   </section>
 
   <main>
-    <div id="meta" class="meta"></div>
+    <div id="meta" class="summary"></div>
     <nav id="tabs" class="tabs"></nav>
     <div id="board" class="board"></div>
     <div id="empty" class="empty hidden">

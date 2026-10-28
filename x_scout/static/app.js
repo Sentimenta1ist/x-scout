@@ -68,16 +68,25 @@ function renderBoard() {
   if (!current) { $("meta").textContent = ""; return; }
 
   const s = current.stats || {};
-  const c = s.claude;
+  const c = s.claude, qg = s.query_gen;
+  const tin = (c ? c.input_tokens : 0) + (qg ? qg.input_tokens : 0);
+  const tout = (c ? c.output_tokens : 0) + (qg ? qg.output_tokens : 0);
+  const usd = (c ? c.cost_usd_equiv : 0) + (qg ? qg.cost_usd_equiv : 0);
+  const mins = (x) => x == null ? null : x < 60 ? `${x}s` : `${Math.floor(x / 60)}m ${x % 60}s`;
+  const stat = (v, label, cls = "") => v == null ? "" : `<div class="stat ${cls}"><b>${v}</b><span>${label}</span></div>`;
   $("meta").innerHTML = [
-    new Date(current.started_at).toLocaleString(),
-    s.scraped != null ? `${s.scraped} posts scraped` : null,
-    c ? `Claude: ${k(c.input_tokens)} in / ${k(c.output_tokens)} out tokens, ${c.duration_s}s` : null,
-    s.total_s ? `${Math.round(s.total_s / 60 * 10) / 10} min total` : null,
-    s.reanalyzed_from ? `re-analysis of run #${s.reanalyzed_from}` : null,
-    s.claude_error ? `<span class="error">Claude failed, local ranking shown</span>` : null,
-    s.error ? `<span class="error">error: ${esc(s.error)}</span>` : null,
-  ].filter(Boolean).join(" · ");
+    stat(new Date(current.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), new Date(current.started_at).toLocaleDateString([], { month: "short", day: "numeric" })),
+    stat(s.scraped, "posts scraped"),
+    stat(s.sent, "sent to Claude"),
+    c || qg ? stat(`${k(tin)} / ${k(tout)}`, "tokens in / out") : "",
+    c || qg ? stat(`$${usd.toFixed(2)}`, "API-price equiv") : "",
+    stat(mins(s.scrape_s), "scraping"),
+    stat(c ? mins(Math.round(c.duration_s)) : null, "Claude"),
+    stat(mins(s.total_s), "total"),
+    s.reanalyzed_from ? stat(`#${s.reanalyzed_from}`, "re-analysis of") : "",
+    s.claude_error ? stat("Claude failed", "local ranking shown", "error") : "",
+    s.error ? stat(esc(s.error).slice(0, 60), "error", "error") : "",
+  ].join("");
   if (!result) return;
 
   if (!result.find((t) => t.topic === activeTopic)) activeTopic = result[0] && result[0].topic;
@@ -108,7 +117,9 @@ async function loadRuns(selectId) {
     const when = new Date(r.started_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     const topics = (r.topics || []).map((t) => t.name).join(", ");
     const mark = r.status === "done" ? "" : r.status === "running" ? " ⏳" : " ✕";
-    return `<option value="${r.id}">#${r.id} ${when}${mark} — ${esc(topics)}</option>`;
+    const c = (r.stats || {}).claude;
+    const tok = c ? ` · ${k(c.input_tokens + c.output_tokens)} tok` : "";
+    return `<option value="${r.id}">#${r.id} ${when}${mark} — ${esc(topics)}${tok}</option>`;
   }).join("");
   const id = selectId || (runs.find((r) => r.status === "done") || runs[0] || {}).id;
   if (id) { sel.value = id; await loadRun(id); } else { current = null; renderBoard(); $("empty").classList.remove("hidden"); }
@@ -132,8 +143,16 @@ async function refresh() {
     ["runBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
     $("reBtn").disabled = busy || !(current && current.has_candidates);
     $("progress").classList.toggle("hidden", !s.running && !(s.log || []).length);
-    $("step").textContent = s.running ? `Running: ${s.step}…` : "Last run log";
+    $("step").textContent = s.running ? `${s.step || "starting"}…` : "Last run finished";
     document.querySelector(".spinner").style.display = s.running ? "" : "none";
+    $("progress").classList.toggle("done", !s.running);
+    $("barFill").style.width = `${Math.round((s.running ? s.progress || 0.02 : 1) * 100)}%`;
+    if (s.running && s.started) {
+      const el = Math.round(Date.now() / 1000 - s.started);
+      const left = s.eta_s ? Math.max(s.eta_s - el, 0) : null;
+      const fmt = (x) => x < 60 ? `${x}s` : `${Math.floor(x / 60)}m ${String(x % 60).padStart(2, "0")}s`;
+      $("timing").textContent = `${Math.round((s.progress || 0) * 100)}% · ${fmt(el)} elapsed` + (left != null ? ` · ~${left ? fmt(left) : "almost done"} left` : "");
+    } else $("timing").textContent = "";
     $("log").textContent = (s.log || []).join("\n");
     $("log").scrollTop = 1e9;
     if (wasRunning && !s.running) await loadRuns(s.run_id);
@@ -141,7 +160,7 @@ async function refresh() {
     wasRunning = s.running;
   } catch {}
 }
-async function loop() { await refresh(); setTimeout(loop, wasRunning ? 1500 : 4000); }
+async function loop() { await refresh(); setTimeout(loop, wasRunning ? 1000 : 4000); }
 
 // ---- settings ----
 function topicRow(t = { name: "", query: "" }) {

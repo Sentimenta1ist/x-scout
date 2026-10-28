@@ -45,3 +45,11 @@ def test_select_candidates_filters_and_dedupes():
     ids = {p["id"] for p in picked}
     assert len(picked) == 25
     assert "39" in ids and "dup" not in ids and "old" not in ids and "tiny" not in ids
+
+
+def test_assemble_keeps_post_in_one_column():
+    a = [_post("1"), _post("2")]
+    reply = "# T\nH 1 4 | a | x\nG 1 4 | a again\nG 2 3 | b\nU 1 4 | a third | y\n"
+    res = assemble(parse_picks(reply), {1: a[0], 2: a[1]}, {"T": a})[0]
+    assert [p["id"] for p in res["hot"]] == ["1"]
+    assert res["useful"] == [] and [p["id"] for p in res["global"]] == ["2"]
