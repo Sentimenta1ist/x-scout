@@ -25,9 +25,9 @@ Scrolling X to find posts worth reading or replying to eats an hour a day. Brows
 
 | Column | What lands there |
 |---|---|
-| 🔥 **Hot** | Young posts that are taking off right now. Reply early, ride the reach. |
-| 🌍 **Global** | The most important posts of the day: launches, news, big debates. |
-| 🎯 **For me** | Useful for *your* work, based on a short profile you write: tools, techniques, people asking for help, builders worth knowing. |
+| <img src="docs/icons/flame.svg" width="16" height="16" align="top"> **Hot** | Young posts that are taking off right now. Reply early, ride the reach. |
+| <img src="docs/icons/globe.svg" width="16" height="16" align="top"> **Global** | The most important posts of the day: launches, news, big debates. |
+| <img src="docs/icons/target.svg" width="16" height="16" align="top"> **For me** | Useful for *your* work, based on a short profile you write: tools, techniques, people asking for help, builders worth knowing. |
 
 Every card has Claude's one-line take, a suggested **reply angle** (copy button), a 1–5 depth rating, the post metrics and a link to open it on X.
 

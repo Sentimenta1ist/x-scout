@@ -41,7 +41,7 @@
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
     .card h3 { margin: 0 0 6px; font-size: 17px; display: flex; gap: 8px; align-items: center; }
     .card p { margin: 0; color: var(--text-2); font-size: 15px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .lic { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .steps { counter-reset: s; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
     .steps .card::before { counter-increment: s; content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-bg); color: var(--accent); font-weight: 700; font-size: 14px; margin-bottom: 10px; }
     code, pre { font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -86,9 +86,9 @@
       <h2>Three columns per topic</h2>
       <p class="lead">3–6 posts each, with Claude's one-line take, a suggested reply angle and a depth rating. Mark posts as seen while you go.</p>
       <div class="cols">
-        <div class="card"><h3><span class="dot" style="background:var(--hot)"></span>Hot</h3><p>Young posts that are taking off right now. Reply early and ride the reach.</p></div>
-        <div class="card"><h3><span class="dot" style="background:var(--accent)"></span>Global</h3><p>The most important posts of the day: launches, news and big debates, so you stay in the loop.</p></div>
-        <div class="card"><h3><span class="dot" style="background:var(--good)"></span>For me</h3><p>Useful for your work, based on a short profile you write: tools, techniques, people asking for help.</p></div>
+        <div class="card"><h3><svg class="lic" viewBox="0 0 24 24" style="color:var(--hot)" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>Hot</h3><p>Young posts that are taking off right now. Reply early and ride the reach.</p></div>
+        <div class="card"><h3><svg class="lic" viewBox="0 0 24 24" style="color:var(--accent)" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>Global</h3><p>The most important posts of the day: launches, news and big debates, so you stay in the loop.</p></div>
+        <div class="card"><h3><svg class="lic" viewBox="0 0 24 24" style="color:var(--good)" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>For me</h3><p>Useful for your work, based on a short profile you write: tools, techniques, people asking for help.</p></div>
       </div>
     </section>
 

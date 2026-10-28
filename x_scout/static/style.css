@@ -86,10 +86,11 @@ main { padding: 16px 24px 48px; }
 .col h2 { display: flex; gap: 8px; align-items: baseline; margin: 0 2px 2px; font-size: 15px; font-weight: 700; }
 .col h2 .n { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--chip); border-radius: 99px; padding: 0 8px; }
 .col h2 .sub { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); }
-.col h2::before { content: ""; width: 8px; height: 8px; border-radius: 50%; align-self: center; background: var(--muted); }
-.col h2.col-hot::before { background: var(--hot); }
-.col h2.col-global::before { background: var(--accent); }
-.col h2.col-useful::before { background: var(--good); }
+.col h2 .ic { width: 16px; height: 16px; align-self: center; opacity: 1; }
+.col h2.col-hot .ic { color: var(--hot); }
+.col h2.col-global .ic { color: var(--accent); }
+.col h2.col-useful .ic { color: var(--good); }
+.topic-row .ic { width: 14px; height: 14px; vertical-align: -2px; }
 .none { color: var(--muted); font-size: 13px; padding: 18px; border: 1px dashed var(--line); border-radius: var(--r); text-align: center; }
 
 /* card */

@@ -7,9 +7,9 @@ const api = async (path, opts = {}) => {
 const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
 
 const COLS = [
-  ["hot", "Hot", "rising fast now"],
-  ["global", "Global", "what everyone talks about"],
-  ["useful", "For me", "useful for my work"],
+  ["hot", "Hot", "rising fast now", "flame"],
+  ["global", "Global", "what everyone talks about", "globe"],
+  ["useful", "For me", "useful for my work", "target"],
 ];
 let current = null;      // loaded run
 let activeTopic = null;
@@ -36,6 +36,10 @@ const ICON = {
   replies: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
   reposts: '<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
   bookmarks: '<path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" class="ic" aria-hidden="true">${ICON[name]}</svg>`;
 const hue = (str) => [...str].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
@@ -121,11 +125,11 @@ function renderBoard() {
   }
   const t = result.find((x) => x.topic === activeTopic);
   if (!t) return;
-  for (const [key, title, sub] of COLS) {
+  for (const [key, title, sub, ic] of COLS) {
     const col = document.createElement("section");
     col.className = "col";
     const items = t[key] || [];
-    col.innerHTML = `<h2 class="col-${key}">${title}<span class="n">${items.length}</span><span class="sub">${sub}</span></h2>`;
+    col.innerHTML = `<h2 class="col-${key}">${icon(ic)}${title}<span class="n">${items.length}</span><span class="sub">${sub}</span></h2>`;
     if (!items.length) col.insertAdjacentHTML("beforeend", `<div class="none">Nothing worth it in this run</div>`);
     items.forEach((p) => col.appendChild(card(p)));
     board.appendChild(col);
@@ -138,7 +142,7 @@ async function loadRuns(selectId) {
   sel.innerHTML = runs.map((r) => {
     const when = new Date(r.started_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     const topics = (r.topics || []).map((t) => t.name).join(", ");
-    const mark = r.status === "done" ? "" : r.status === "running" ? " ⏳" : " ✕";
+    const mark = r.status === "done" ? "" : r.status === "running" ? " (running)" : " (failed)";
     const c = (r.stats || {}).claude;
     const tok = c ? ` · ${k(c.input_tokens + c.output_tokens)} tok` : "";
     return `<option value="${r.id}">#${r.id} ${when}${mark} — ${esc(topics)}${tok}</option>`;
@@ -190,7 +194,7 @@ function topicRow(t = { name: "", query: "" }) {
   row.className = "topic-row";
   row.innerHTML = `<input class="tname" placeholder="AI agents" value="${esc(t.name)}">
     <input class="tquery" placeholder='query, e.g. ("AI agent" OR agentic) -crypto' value="${esc(t.query || "")}">
-    <button class="ghost small">✕</button>`;
+    <button class="ghost small" title="Remove topic">${icon("x")}</button>`;
   row.querySelector("button").onclick = () => row.remove();
   return row;
 }
