@@ -1,4 +1,4 @@
-"""Pre-filter scraped posts locally, then one `claude -p` call ranks them into three columns per topic.
+"""Pre-filter scraped posts locally, then one `claude -p` call picks up to 5 posts per topic: worth a reply, or just worth reading.
 
 Claude sees one compact line per post (~40 per topic), posts are referenced by a local index instead of
 19-digit ids, and the CLI runs with a tiny system prompt, no tools, no settings, empty cwd
@@ -12,22 +12,24 @@ import subprocess
 from . import config
 from .parse import compact_text
 
-SYSTEM = """You review X (Twitter) posts for one reader. Input: reader profile, then posts grouped by topic.
-Post line: n|tag|author|followers|age|views|likes|replies|reposts|bookmarks|score|text
+SYSTEM = """You are a strict curator of X (Twitter) posts for one reader. Input: reader profile, then posts grouped by topic.
+Post line: n|author|followers|age|views|likes|replies|reposts|bookmarks|score|text
 score = local early-virality score 0-100 (velocity vs age and vs author's usual reach). [img]/[vid] = media, QT = quoted post.
-tag is set by the numbers, not by you: H = rising fast right now, G = one of the biggest posts of the day, - = neither.
-For every topic:
-H and G: output one line for each tagged post, with its own tag. Omit the post if it is spam, a giveaway, engagement bait,
-an ad, or off-topic for the topic name. Do not move posts between H and G.
-U: from untagged posts pick 0-6 that are genuinely valuable for the reader given the profile AND fit the topic name:
-practical insight, tools, techniques, leads, people worth knowing. Fewer is better than filler, zero is fine.
-Output plain text only, no markdown, exactly this format:
+For every topic pick AT MOST 5 posts in total, the best ones only, split into two kinds:
+R = worth the reader's reply: fresh (ideally <12h), the author has reach or the post is taking off, the thread is not
+    already flooded, and the reader can add something concrete from his own experience (see profile).
+S = worth reading or saving: real substance a smart engineer would bookmark: deep explanation, data, postmortem,
+    a genuinely new tool or result, a strong original take.
+The post must be about the topic name itself. A post that is mainly about AI/agents/LLMs belongs only to an AI topic,
+never to Crypto, Games, Computer science etc., even if the text mentions the topic.
+Reject: launches that are only marketing, "X is insane"/"you must build these" hype, listicles, course and tool roundups,
+promos, giveaways, price talk, rage bait, vague threads with no specifics. Fewer is better than filler: 0-2 is fine.
+Output plain text only, no markdown, exactly this format, best first:
 # <topic name as given>
-H <n> <q> | <gist> | <why> | <angle>
-G <n> <q> | <gist> | <why>
-U <n> <q> | <gist> | <why> | <angle>
+R <n> <q> | <gist> | <why> | <angle>
+S <n> <q> | <gist> | <why>
 q = depth/quality 1-5. gist: what the post says, 1-2 short sentences in {gist_lang}, so the reader can skip the full text; keep key numbers and names.
-why: <=12 words, concrete, no filler. angle: <=14 words reply direction for the reader; leave empty if a reply makes no sense."""
+why: <=12 words, concrete, no filler. angle (R only): <=14 words, what exactly the reader could reply."""
 
 
 def ranking_system(gist_lang="English"):
@@ -88,23 +90,12 @@ def select_candidates(posts, limit=25, max_age_h=36):
     return picked
 
 
-def presplit(posts, global_min_views=5000, limit=6):
-    """Hot and Global are decided by numbers: radar label for Hot, absolute reach for Global. {post id: "H" | "G"}."""
-    hot = sorted((p for p in posts if p["scored"]["label"] in ("hot", "rising")),
-                 key=lambda p: p["scored"]["score"], reverse=True)[:limit]
-    taken = {p["id"] for p in hot}
-    big = sorted((p for p in posts if p["id"] not in taken and (p.get("views") or 0) >= global_min_views),
-                 key=lambda p: p["views"], reverse=True)[:limit]
-    return {**{p["id"]: "H" for p in hot}, **{p["id"]: "G" for p in big}}
-
-
-def digest(profile, by_topic, global_min_views=5000):
+def digest(profile, by_topic):
     """by_topic: {topic: [candidate posts]} → (prompt text, index → post)."""
     lines = ["PROFILE:", profile.strip(), ""]
     index, n = {}, 0
     for topic, posts in by_topic.items():
         lines.append(f"## TOPIC: {topic}")
-        tags = presplit(posts, global_min_views)
         for p in posts:
             n += 1
             index[n] = p
@@ -114,7 +105,7 @@ def digest(profile, by_topic, global_min_views=5000):
                 text += f" QT {compact_text(p['quoted'], 200)}"
             a = p["author"]
             lines.append("|".join([
-                str(n), tags.get(p["id"], "-"), "@" + a["handle"], _k(a["followers"]), _age(p["age_min"]), _k(p["views"]), _k(p["likes"]),
+                str(n), "@" + a["handle"], _k(a["followers"]), _age(p["age_min"]), _k(p["views"]), _k(p["likes"]),
                 _k(p["replies"]), _k(p["reposts"]), _k(p["bookmarks"]), str(p["scored"]["score"]), media + text,
             ]))
         lines.append("")
@@ -171,18 +162,19 @@ def run_claude(prompt, model=None, timeout=600, system=None, raw=False):
     return data, usage
 
 
-_PICK = re.compile(r"^([HGU])\s+#?(\d+)\s+(\d)?\s*\|?\s*(.*)$")
-_COL = {"H": "hot", "G": "global", "U": "useful"}
+_PICK = re.compile(r"^([RS])\s+#?(\d+)\s+(\d)?\s*\|?\s*(.*)$")
+_COL = {"R": "reply", "S": "save"}
+MAX_PER_TOPIC = 5
 
 
 def parse_picks(text):
-    """Line format from SYSTEM → {"topics": [{"topic", "hot": [{n, q, gist, why, angle}], ...}]}.
+    """Line format from SYSTEM → {"topics": [{"topic", "reply": [{n, q, gist, why, angle}], "save": [...]}]}.
     Plain lines instead of --json-schema: structured output costs a second model turn that re-reads the whole prompt."""
     topics, cur = [], None
     for raw in text.splitlines():
         line = raw.strip().strip("`")
         if line.startswith("#"):
-            cur = {"topic": line.lstrip("#").strip(), "hot": [], "global": [], "useful": []}
+            cur = {"topic": line.lstrip("#").strip(), "reply": [], "save": []}
             topics.append(cur)
             continue
         m = _PICK.match(line)
@@ -196,30 +188,23 @@ def parse_picks(text):
     return {"topics": topics}
 
 
-def assemble(claude_data, index, topics, global_min_views=5000):
-    """Map Claude's picks (by local index) back to full posts. Hot/Global keep only posts the numbers tagged
-    (ordered by score / views); Claude can only drop them. Useful takes untagged posts in Claude's order."""
+def assemble(claude_data, index, topics):
+    """Map Claude's picks (by local index) back to full posts, in Claude's order. A post lands in one column only,
+    picks from another topic are dropped, at most MAX_PER_TOPIC per topic across both columns."""
     by_name = {t["topic"].strip().lower(): t for t in claude_data.get("topics", [])}
     result = []
     for name, posts in topics.items():
         allowed = {id(p) for p in posts}
-        tags = presplit(posts, global_min_views)
         t = by_name.get(name.lower(), {})
-        cols, seen = {}, set()
-        for col, tag in (("hot", "H"), ("global", "G"), ("useful", None)):
-            items = []
+        cols, seen = {"reply": [], "save": []}, set()
+        for col in ("reply", "save"):
             for pick in t.get(col, []):
                 p = index.get(pick.get("n"))
-                if not p or id(p) not in allowed or p["id"] in seen or tags.get(p["id"]) != tag:
+                if not p or id(p) not in allowed or p["id"] in seen or len(seen) >= MAX_PER_TOPIC:
                     continue
                 seen.add(p["id"])
-                items.append({**slim(p), "gist": pick.get("gist", ""), "why": pick.get("why", ""),
-                              "angle": pick.get("angle") or "", "q": pick.get("q")})
-            if col == "hot":
-                items.sort(key=lambda x: x["score"], reverse=True)
-            elif col == "global":
-                items.sort(key=lambda x: x["views"], reverse=True)
-            cols[col] = items[:6]
+                cols[col].append({**slim(p), "gist": pick.get("gist", ""), "why": pick.get("why", ""),
+                                  "angle": (pick.get("angle") or "") if col == "reply" else "", "q": pick.get("q")})
         result.append({"topic": name, "candidates": len(posts), **cols})
     return result
 

@@ -10,7 +10,7 @@
 
 [Website](https://sentimenta1ist.github.io/x-scout/) · [How it works](#how-it-works) · [Quick start](#quick-start) · [Token cost](#token-cost)
 
-<img src="docs/img/board-dark.png" alt="X Scout board: Hot, Global and For me columns for the AI agents topic" width="100%">
+<img src="docs/img/board-dark.png" alt="X Scout board for the AI agents topic" width="100%">
 
 </div>
 
@@ -21,15 +21,14 @@ Scrolling X to find posts worth reading or replying to eats an hour a day. Brows
 1. searches X for your topics in a real browser, the way a person would;
 2. scores every post for early virality locally, for free;
 3. sends only the best ~40 candidates per topic to **one** `claude -p` call as compact text;
-4. shows three columns per topic, 3–6 posts each.
+4. shows at most 5 posts per topic, in two columns. Fewer is fine: no filler.
 
 | Column | What lands there |
 |---|---|
-| <img src="docs/icons/flame.svg" width="16" height="16" align="top"> **Hot** | Young posts that are taking off right now. Reply early, ride the reach. |
-| <img src="docs/icons/globe.svg" width="16" height="16" align="top"> **Global** | The most important posts of the day: launches, news, big debates. |
-| <img src="docs/icons/target.svg" width="16" height="16" align="top"> **For me** | Useful for *your* work, based on a short profile you write: tools, techniques, people asking for help, builders worth knowing. |
+| **Reply** | Fresh posts with reach where *you* can add something concrete, based on a short profile you write. Comes with a suggested reply angle. |
+| **Read** | Posts with real substance worth reading or saving: deep dives, data, postmortems, genuinely new tools. |
 
-Every card has Claude's one-line take, a 1–2 sentence summary of the post (in a language you pick), a suggested **reply angle** (copy button), a 1–5 depth rating, the post metrics and a link to open it on X.
+Every card has Claude's one-line take, a 1–2 sentence summary of the post (in a language you pick), a 1–5 depth rating, the post metrics and a link to open it on X. Reply cards also get a **reply angle** (copy button).
 
 ## Features
 
@@ -61,7 +60,7 @@ flowchart LR
     C --> D[Local virality score<br/>+ author history]
     D --> E[Top ~40 per topic<br/>one line per post]
     E --> F["claude -p (Sonnet)<br/>one call per run"]
-    F --> G[Hot · Global · For me<br/>why + reply angle]
+    F --> G[Reply · Read, up to 5<br/>why + reply angle]
     D --> H[(SQLite: posts,<br/>snapshots, runs)]
     H -.->|acceleration next run| D
 ```
@@ -111,7 +110,6 @@ X_SCOUT_DATA=./demo-data uv run x-scout
 | Posts per tab | 40 | Posts collected from **Top** and from **Latest** for each topic. |
 | Candidates per topic | 40 | How many of the best-scored posts go to Claude. Main token knob. |
 | Model | `sonnet` | `haiku` is cheaper, `opus` is more thorough. |
-| Global: min views | 5000 | Global column takes only posts with at least this many views. Hot takes only posts the radar labels hot or rising (under 6 h). |
 | Summary language | `English` | Language of the short per-post summary, e.g. `Russian`. |
 | Headless | on | Turn off to watch the browser work. |
 

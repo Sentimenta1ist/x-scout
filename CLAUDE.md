@@ -1,6 +1,6 @@
 # x-scout
 
-Local app: searches X for up to 5 topics through a real Chrome profile (Playwright), scores posts for early virality (ported from github.com/Sentimenta1ist/x-viral-radar `scoring.js`), then one `claude -p` call sorts candidates into three columns per topic: hot / global / useful-for-me. UI is FastAPI + one vanilla-JS page.
+Local app: searches X for up to 5 topics through a real Chrome profile (Playwright), scores posts for early virality (ported from github.com/Sentimenta1ist/x-viral-radar `scoring.js`), then one `claude -p` call picks up to 5 posts per topic in two columns: worth a reply / worth reading. UI is FastAPI + one vanilla-JS page.
 
 - `x_scout/browser.py` Playwright, persistent profile in `data/browser-profile`. Reads X's own `SearchTimeline` GraphQL responses, never the DOM. Keep it human-paced (randomized pauses, few scrolls); stop on 429 or login redirect. No clicks, likes, follows, posting.
 - `x_scout/parse.py` GraphQL → flat post dict. X moves fields between schema versions; look up new place first, then legacy.

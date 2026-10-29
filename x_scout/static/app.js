@@ -7,6 +7,11 @@ const api = async (path, opts = {}) => {
 const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
 
 const COLS = [
+  ["reply", "Reply", "worth my reply", "reply"],
+  ["save", "Read", "interesting, worth saving", "bookmark"],
+];
+// runs before the reply/save split were stored as three columns
+const LEGACY_COLS = [
   ["hot", "Hot", "rising fast now", "flame"],
   ["global", "Global", "what everyone talks about", "globe"],
   ["useful", "For me", "useful for my work", "target"],
@@ -39,6 +44,8 @@ const ICON = {
   flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
   globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
   target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  reply: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/>',
+  bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><path d="M12 7v6"/><path d="M15 10H9"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" class="ic" aria-hidden="true">${ICON[name]}</svg>`;
@@ -126,7 +133,9 @@ function renderBoard() {
   }
   const t = result.find((x) => x.topic === activeTopic);
   if (!t) return;
-  for (const [key, title, sub, ic] of COLS) {
+  const cols = t.reply || t.save ? COLS : LEGACY_COLS;
+  board.style.setProperty("--cols", cols.length);
+  for (const [key, title, sub, ic] of cols) {
     const col = document.createElement("section");
     col.className = "col";
     const items = t[key] || [];
@@ -207,7 +216,7 @@ async function openSettings() {
   $("topics").innerHTML = "";
   s.topics.forEach((t) => $("topics").appendChild(topicRow(t)));
   $("lang").value = s.lang; $("perMode").value = s.per_mode; $("cands").value = s.candidates;
-  $("model").value = s.model; $("headless").checked = s.headless; $("gistLang").value = s.gist_lang; $("globalMin").value = s.global_min_views;
+  $("model").value = s.model; $("headless").checked = s.headless; $("gistLang").value = s.gist_lang;
   $("profile").value = p.text;
   $("saveMsg").textContent = p.custom ? "" : "Profile is the example: edit it to describe yourself.";
   panel.classList.remove("hidden");
@@ -221,7 +230,6 @@ async function saveSettings() {
   await post("/api/settings", {
     topics, lang: $("lang").value.trim(), per_mode: +$("perMode").value || 30, candidates: +$("cands").value || 25,
     model: $("model").value, headless: $("headless").checked, gist_lang: $("gistLang").value.trim() || "English",
-    global_min_views: +$("globalMin").value || 5000,
   });
   await post("/api/profile", { text: $("profile").value });
   $("saveMsg").textContent = "Saved.";

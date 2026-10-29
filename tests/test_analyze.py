@@ -1,12 +1,12 @@
-from x_scout.analyze import assemble, parse_picks, presplit, ranking_system, select_candidates
+from x_scout.analyze import MAX_PER_TOPIC, assemble, parse_picks, ranking_system, select_candidates
 
 REPLY = """# AI agents
-H 3 4 | автор выпустил MCP-сервер | young MCP post, fast | ask about auth
-G 1 5 | крупный запуск | big launch
-U 2 3 | ищет, как разбирать счета | lead: invoice automation | offer PDF → sheet flow
+R 3 4 | автор выпустил MCP-сервер | young MCP post, fast | ask about auth
+S 1 5 | разбор архитектуры | real numbers
 junk line
+H 2 3 | old format | ignored | x
 # Crypto
-H #9 2 | g | wrong topic index | x
+R #9 2 | g | wrong topic index | x
 """
 
 
@@ -20,37 +20,37 @@ def test_parse_picks():
     d = parse_picks(REPLY)
     agents = d["topics"][0]
     assert agents["topic"] == "AI agents"
-    assert agents["hot"] == [{"n": 3, "q": 4, "gist": "автор выпустил MCP-сервер", "why": "young MCP post, fast",
-                              "angle": "ask about auth"}]
-    assert agents["global"][0] == {"n": 1, "q": 5, "gist": "крупный запуск", "why": "big launch", "angle": ""}
-    assert agents["useful"][0]["angle"] == "offer PDF → sheet flow"
-    assert d["topics"][1]["hot"][0]["n"] == 9
+    assert agents["reply"] == [{"n": 3, "q": 4, "gist": "автор выпустил MCP-сервер", "why": "young MCP post, fast",
+                                "angle": "ask about auth"}]
+    assert agents["save"] == [{"n": 1, "q": 5, "gist": "разбор архитектуры", "why": "real numbers", "angle": ""}]
+    assert d["topics"][1]["reply"][0]["n"] == 9
 
 
 def test_assemble_maps_index_and_rejects_cross_topic():
-    a = [_post("1", views=9000), _post("2", views=300), _post("3", label="rising")]
-    c = [_post("9", label="hot")]
+    a = [_post("1"), _post("2"), _post("3")]
+    c = [_post("9")]
     index = {1: a[0], 2: a[1], 3: a[2], 4: c[0]}
     res = assemble(parse_picks(REPLY), index, {"AI agents": a, "Crypto": c})
-    assert [p["id"] for p in res[0]["hot"]] == ["3"]
-    assert [p["id"] for p in res[0]["global"]] == ["1"]
-    assert res[0]["useful"][0]["why"].startswith("lead")
-    assert res[0]["hot"][0]["gist"] == "автор выпустил MCP-сервер"
-    assert res[1]["hot"] == []  # n=9 not in index → dropped
+    assert [p["id"] for p in res[0]["reply"]] == ["3"]
+    assert [p["id"] for p in res[0]["save"]] == ["1"]
+    assert res[0]["reply"][0]["gist"] == "автор выпустил MCP-сервер"
+    assert res[1]["reply"] == []  # n=9 not in index → dropped
 
 
-def test_presplit_hot_by_radar_label_global_by_views():
-    posts = [_post("old-big", views=80000, label="old"), _post("rising", views=900, score=55, label="rising"),
-             _post("hot", views=20000, score=80, label="hot"), _post("small", views=400)]
-    assert presplit(posts, global_min_views=5000) == {"hot": "H", "rising": "H", "old-big": "G"}
-
-
-def test_assemble_rejects_claude_picks_outside_numbers():
-    a = [_post("1", views=300), _post("2", views=300)]
-    reply = "# T\nH 1 4 | g | not rising | x\nG 2 4 | g | not big\nU 1 4 | g | fine | y\n"
+def test_assemble_keeps_post_in_one_column_and_drops_save_angle():
+    a = [_post("1"), _post("2")]
+    reply = "# T\nR 1 4 | g | a | x\nS 1 4 | g | a again\nS 2 3 | g | b | stray angle\n"
     res = assemble(parse_picks(reply), {1: a[0], 2: a[1]}, {"T": a})[0]
-    assert res["hot"] == [] and res["global"] == []
-    assert [p["id"] for p in res["useful"]] == ["1"]
+    assert [p["id"] for p in res["reply"]] == ["1"]
+    assert [p["id"] for p in res["save"]] == ["2"]
+    assert res["save"][0]["angle"] == ""
+
+
+def test_assemble_caps_posts_per_topic():
+    a = [_post(str(i)) for i in range(1, 9)]
+    reply = "# T\n" + "".join(f"R {i} 3 | g | w | x\n" for i in range(1, 4)) + "".join(f"S {i} 3 | g | w\n" for i in range(4, 9))
+    res = assemble(parse_picks(reply), {i + 1: p for i, p in enumerate(a)}, {"T": a})[0]
+    assert len(res["reply"]) == 3 and len(res["save"]) == MAX_PER_TOPIC - 3
 
 
 def test_select_candidates_filters_and_dedupes():
@@ -62,14 +62,6 @@ def test_select_candidates_filters_and_dedupes():
     ids = {p["id"] for p in picked}
     assert len(picked) == 25
     assert "39" in ids and "dup" not in ids and "old" not in ids and "tiny" not in ids
-
-
-def test_assemble_keeps_post_in_one_column():
-    a = [_post("1", label="hot"), _post("2", views=300)]
-    reply = "# T\nH 1 4 | g | a | x\nG 1 4 | g | a again\nU 1 4 | g | a third | y\nU 2 3 | g | b | z\n"
-    res = assemble(parse_picks(reply), {1: a[0], 2: a[1]}, {"T": a})[0]
-    assert [p["id"] for p in res["hot"]] == ["1"]
-    assert res["global"] == [] and [p["id"] for p in res["useful"]] == ["2"]
 
 
 def test_ranking_system_sets_gist_language():
