@@ -100,6 +100,13 @@ async def start_run():
     return {"ok": True}
 
 
+@app.post("/api/stop")
+async def stop_run():
+    if not pipeline.stop():
+        raise HTTPException(409, "nothing is running")
+    return {"ok": True}
+
+
 @app.post("/api/runs/{run_id}/reanalyze")
 async def reanalyze(run_id: int):
     _busy()

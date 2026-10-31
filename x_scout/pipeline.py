@@ -22,6 +22,17 @@ MAX_TOPICS = 5
 
 # live state of the current run, polled by the UI
 state = {"running": False, "run_id": None, "step": "", "log": [], "progress": 0.0, "eta_s": None, "started": None}
+_task = None  # asyncio task of the current run, for Stop
+
+
+def stop():
+    """Cancel the current run or re-analyze: closes the browser and kills claude -p. Returns False if nothing is running."""
+    if not state["running"] or not _task:
+        return False
+    state["step"] = "stopping"
+    analyze.stop_claude()
+    _task.cancel()
+    return True
 
 
 def _progress(done, total, step):
@@ -98,6 +109,8 @@ def _eta(n_topics):
 
 
 async def run(settings):
+    global _task
+    _task = asyncio.current_task()
     topics = settings["topics"][:MAX_TOPICS]
     state.update(running=True, step="starting", log=[], progress=0.0, eta_s=_eta(len(topics)), started=time.time())
     t0 = time.time()
@@ -146,6 +159,9 @@ async def run(settings):
         stats["total_s"] = round(time.time() - t0)
         db.finish_run(run_id, "done", result, stats)
         _log(f"done in {stats['total_s']}s")
+    except asyncio.CancelledError:
+        _log("stopped")
+        db.finish_run(run_id, "stopped", stats={**stats, "error": "stopped"})
     except browser.NeedLogin:
         _log("X asks to log in: press 'Log in to X' and retry")
         db.finish_run(run_id, "error", stats={**stats, "error": "need_login"})
@@ -161,6 +177,8 @@ async def run(settings):
 
 async def reanalyze(run_id, settings):
     """Run Claude again on a stored run's candidates (no scraping). For prompt/model tuning."""
+    global _task
+    _task = asyncio.current_task()
     src = db.get_run(run_id)
     if not src or not src.get("candidates"):
         raise ValueError("run has no stored candidates")
@@ -175,6 +193,9 @@ async def reanalyze(run_id, settings):
                                                "sent": sum(len(v) for v in src["candidates"].values()),
                                                "total_s": usage["duration_s"]})
         _log("done")
+    except asyncio.CancelledError:
+        _log("stopped")
+        db.finish_run(new_id, "stopped", stats={"error": "stopped"})
     except Exception as e:
         _log(f"error: {e!r}")
         db.finish_run(new_id, "error", stats={"error": str(e)[:500]})

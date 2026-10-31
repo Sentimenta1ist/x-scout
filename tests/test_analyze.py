@@ -1,3 +1,7 @@
+import threading
+import time
+
+from x_scout import analyze
 from x_scout.analyze import MAX_PER_COLUMN, assemble, is_junk, parse_picks, ranking_system, select_candidates
 
 REPLY = """# AI agents
@@ -89,3 +93,26 @@ def test_select_candidates_filters_and_dedupes():
 def test_ranking_system_sets_gist_language():
     assert "in Russian" in ranking_system("Russian")
     assert "in English" in ranking_system("")
+
+
+def test_stop_claude_kills_the_running_call(tmp_path, monkeypatch):
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nexec sleep 30\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(analyze.config, "claude_bin", lambda: str(fake))
+    monkeypatch.setattr(analyze.config, "CLAUDE_CWD", tmp_path)
+    errors = []
+
+    def call():
+        try:
+            analyze.run_claude("x", model="m")
+        except RuntimeError as e:
+            errors.append(str(e))
+
+    t = threading.Thread(target=call)
+    t.start()
+    while analyze._proc is None:
+        time.sleep(0.01)
+    analyze.stop_claude()
+    t.join(5)
+    assert not t.is_alive() and "failed" in errors[0]

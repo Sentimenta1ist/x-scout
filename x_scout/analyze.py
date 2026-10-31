@@ -146,6 +146,14 @@ def generate_queries(profile, names, model=None):
     return out, usage
 
 
+_proc = None  # the running `claude -p`, so Stop can end it instead of letting it spend tokens
+
+
+def stop_claude():
+    if _proc:
+        _proc.kill()
+
+
 def run_claude(prompt, model=None, timeout=600, system=None, raw=False):
     cmd = [
         config.claude_bin(), "-p",
@@ -157,11 +165,21 @@ def run_claude(prompt, model=None, timeout=600, system=None, raw=False):
         "--no-session-persistence",
         "--output-format", "json",
     ]
-    proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=config.CLAUDE_CWD)
+    global _proc
+    proc = _proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    cwd=config.CLAUDE_CWD)
     try:
-        out = json.loads(proc.stdout)
+        stdout, stderr = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise RuntimeError(f"claude -p timed out after {timeout}s")
+    finally:
+        _proc = None
+    try:
+        out = json.loads(stdout)
     except json.JSONDecodeError:
-        raise RuntimeError(f"claude -p failed (exit {proc.returncode}): {(proc.stderr or proc.stdout)[-800:]}")
+        raise RuntimeError(f"claude -p failed (exit {proc.returncode}): {(stderr or stdout)[-800:]}")
     if out.get("is_error"):
         raise RuntimeError(f"claude -p error: {out.get('result')}")
     data = (out.get("result") or "") if raw else parse_picks(out.get("result") or "")

@@ -152,7 +152,7 @@ async function loadRuns(selectId) {
   sel.innerHTML = runs.map((r) => {
     const when = new Date(r.started_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     const topics = (r.topics || []).map((t) => t.name).join(", ");
-    const mark = r.status === "done" ? "" : r.status === "running" ? " (running)" : " (failed)";
+    const mark = r.status === "done" ? "" : r.status === "running" ? " (running)" : r.status === "stopped" ? " (stopped)" : " (failed)";
     const c = (r.stats || {}).claude;
     const tok = c ? ` · ${k(c.input_tokens + c.output_tokens)} tok` : "";
     return `<option value="${r.id}">#${r.id} ${when}${mark} — ${esc(topics)}${tok}</option>`;
@@ -178,6 +178,8 @@ async function refresh() {
     const busy = s.running || s.login === "waiting" || s.login === "checking";
     ["runBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
     $("reBtn").disabled = busy || !(current && current.has_candidates);
+    $("runBtn").classList.toggle("hidden", s.running);
+    $("stopBtn").classList.toggle("hidden", !s.running);
     $("progress").classList.toggle("hidden", !s.running && !logOpen);
     $("step").textContent = s.running ? `${s.step || "starting"}…` : "Last run finished";
     document.querySelector(".spinner").style.display = s.running ? "" : "none";
@@ -238,6 +240,7 @@ async function saveSettings() {
 
 const act = (fn) => async () => { try { await fn(); } catch (e) { alert(e.message); } refresh(); };
 $("runBtn").onclick = act(() => post("/api/run"));
+$("stopBtn").onclick = act(() => post("/api/stop"));
 $("loginBtn").onclick = act(() => post("/api/login"));
 $("checkBtn").onclick = act(() => post("/api/login/check"));
 $("reBtn").onclick = act(() => post(`/api/runs/${$("runSelect").value}/reanalyze`));
