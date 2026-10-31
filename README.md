@@ -21,7 +21,7 @@ Scrolling X to find posts worth reading or replying to eats an hour a day. Brows
 1. searches X for your topics in a real browser, the way a person would;
 2. scores every post for early virality locally, for free;
 3. sends only the best ~40 candidates per topic to **one** `claude -p` call as compact text;
-4. shows at most 5 posts per topic, in two columns. Fewer is fine: no filler.
+4. shows up to 5 posts to reply to and up to 5 to read per topic. Junk never fills a column.
 
 | Column | What lands there |
 |---|---|
@@ -60,7 +60,7 @@ flowchart LR
     C --> D[Local virality score<br/>+ author history]
     D --> E[Top ~40 per topic<br/>one line per post]
     E --> F["claude -p (Sonnet)<br/>one call per run"]
-    F --> G[Reply · Read, up to 5<br/>why + reply angle]
+    F --> G[Reply · Read, up to 5 each<br/>why + reply angle]
     D --> H[(SQLite: posts,<br/>snapshots, runs)]
     H -.->|acceleration next run| D
 ```

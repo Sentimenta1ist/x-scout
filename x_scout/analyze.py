@@ -1,4 +1,4 @@
-"""Pre-filter scraped posts locally, then one `claude -p` call picks up to 5 posts per topic: worth a reply, or just worth reading.
+"""Pre-filter scraped posts locally, then one `claude -p` call picks up to 5 posts to reply to and up to 5 to read per topic.
 
 Claude sees one compact line per post (~40 per topic), posts are referenced by a local index instead of
 19-digit ids, and the CLI runs with a tiny system prompt, no tools, no settings, empty cwd
@@ -15,15 +15,16 @@ from .parse import compact_text
 SYSTEM = """You are a strict curator of X (Twitter) posts for one reader. Input: reader profile, then posts grouped by topic.
 Post line: n|author|followers|age|views|likes|replies|reposts|bookmarks|score|text
 score = local early-virality score 0-100 (velocity vs age and vs author's usual reach). [img]/[vid] = media, QT = quoted post.
-For every topic pick AT MOST 5 posts in total, the best ones only, split into two kinds:
-R = worth the reader's reply: fresh (ideally <12h), the author has reach or the post is taking off, the thread is not
-    already flooded, and the reader can add something concrete from his own experience (see profile).
+For every topic pick up to 5 R posts and up to 5 S posts, best first. Fill both lists when good posts exist.
+R = worth the reader's reply. Required: younger than 24h, and the profile gives him something concrete to add.
+    Rank higher: younger than 12h, an author with reach or a post taking off, a thread not flooded with replies.
+    Never R for a topic the profile marks as read-only.
 S = worth reading or saving: real substance a smart engineer would bookmark: deep explanation, data, postmortem,
     a genuinely new tool or result, a strong original take.
 The post must be about the topic name itself. A post that is mainly about AI/agents/LLMs belongs only to an AI topic,
 never to Crypto, Games, Computer science etc., even if the text mentions the topic.
 Reject: launches that are only marketing, "X is insane"/"you must build these" hype, listicles, course and tool roundups,
-promos, giveaways, price talk, rage bait, vague threads with no specifics. Fewer is better than filler: 0-2 is fine.
+promos, giveaways, price talk, rage bait, vague threads with no specifics. Rejected posts never fill a list, even if it stays short.
 Output plain text only, no markdown, exactly this format, best first:
 # <topic name as given>
 R <n> <q> | <gist> | <why> | <angle>
@@ -54,13 +55,24 @@ def _norm(text):
     return re.sub(r"\W+", "", (text or "").lower())[:80]
 
 
-def select_candidates(posts, limit=25, max_age_h=36):
-    """posts carry 'age_min' and 'scored'. Keep a mix: early risers, big posts of the day, high-engagement niche."""
+_JUNK = re.compile(
+    r"drop (your|ur|a)\b|giving away|giveaway|airdrop|presale|memecoin|turn (my |on )*notifications"
+    r"|\b(follow|like)\b.{0,60}\b(rt|retweet|repost)\b|\b(rt|retweet|repost)\b.{0,30}\b(comment|follow|drop)\b",
+    re.IGNORECASE | re.DOTALL)
+
+
+def is_junk(text):
+    return bool(_JUNK.search(text or ""))
+
+
+def select_candidates(posts, limit=25, max_age_h=36, fresh_h=12):
+    """posts carry 'age_min' and 'scored'. Keep a mix: fresh posts worth replying to, early risers, big posts of the day,
+    high-engagement niche."""
     pool, dupes = [], set()
     for p in posts:
         if p.get("is_reply") or p.get("age_min") is None or p["age_min"] > max_age_h * 60:
             continue
-        if not p.get("views") or p["views"] < 200 or len((p.get("text") or "").strip()) < 15:
+        if not p.get("views") or p["views"] < 200 or len((p.get("text") or "").strip()) < 15 or is_junk(p["text"]):
             continue
         key = _norm(p["text"])
         if key in dupes:
@@ -78,9 +90,10 @@ def select_candidates(posts, limit=25, max_age_h=36):
         # bookmarks and replies per view ≈ "worth saving / worth discussing"
         return (2 * p["bookmarks"] + p["replies"]) / p["views"] if p["views"] >= 500 else 0
 
+    fresh = [p for p in pool if p["age_min"] <= fresh_h * 60]
     picked, ids = [], set()
-    for key, n in ((score, limit * 0.45), (size, limit * 0.35), (depth, limit)):
-        for p in sorted(pool, key=key, reverse=True):
+    for subset, key, n in ((fresh, score, limit * 0.4), (pool, score, limit * 0.2), (pool, size, limit * 0.2), (pool, depth, limit)):
+        for p in sorted(subset, key=key, reverse=True):
             if len(picked) >= limit or n <= 0:
                 break
             if p["id"] not in ids:
@@ -164,7 +177,8 @@ def run_claude(prompt, model=None, timeout=600, system=None, raw=False):
 
 _PICK = re.compile(r"^([RS])\s+#?(\d+)\s+(\d)?\s*\|?\s*(.*)$")
 _COL = {"R": "reply", "S": "save"}
-MAX_PER_TOPIC = 5
+MAX_PER_COLUMN = 5
+REPLY_MAX_AGE_H = 24
 
 
 def parse_picks(text):
@@ -190,17 +204,21 @@ def parse_picks(text):
 
 def assemble(claude_data, index, topics):
     """Map Claude's picks (by local index) back to full posts, in Claude's order. A post lands in one column only,
-    picks from another topic are dropped, at most MAX_PER_TOPIC per topic across both columns."""
+    picks from another topic are dropped, at most MAX_PER_COLUMN per column. A reply pick older than REPLY_MAX_AGE_H
+    moves to "save": the thread is too old to answer."""
     by_name = {t["topic"].strip().lower(): t for t in claude_data.get("topics", [])}
     result = []
     for name, posts in topics.items():
         allowed = {id(p) for p in posts}
         t = by_name.get(name.lower(), {})
         cols, seen = {"reply": [], "save": []}, set()
-        for col in ("reply", "save"):
-            for pick in t.get(col, []):
+        for picked_col in ("reply", "save"):
+            for pick in t.get(picked_col, []):
                 p = index.get(pick.get("n"))
-                if not p or id(p) not in allowed or p["id"] in seen or len(seen) >= MAX_PER_TOPIC:
+                if not p or id(p) not in allowed or p["id"] in seen:
+                    continue
+                col = "save" if picked_col == "reply" and (p.get("age_min") or 0) > REPLY_MAX_AGE_H * 60 else picked_col
+                if len(cols[col]) >= MAX_PER_COLUMN:
                     continue
                 seen.add(p["id"])
                 cols[col].append({**slim(p), "gist": pick.get("gist", ""), "why": pick.get("why", ""),

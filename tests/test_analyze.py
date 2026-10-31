@@ -1,4 +1,4 @@
-from x_scout.analyze import MAX_PER_TOPIC, assemble, parse_picks, ranking_system, select_candidates
+from x_scout.analyze import MAX_PER_COLUMN, assemble, is_junk, parse_picks, ranking_system, select_candidates
 
 REPLY = """# AI agents
 R 3 4 | автор выпустил MCP-сервер | young MCP post, fast | ask about auth
@@ -46,11 +46,33 @@ def test_assemble_keeps_post_in_one_column_and_drops_save_angle():
     assert res["save"][0]["angle"] == ""
 
 
-def test_assemble_caps_posts_per_topic():
-    a = [_post(str(i)) for i in range(1, 9)]
-    reply = "# T\n" + "".join(f"R {i} 3 | g | w | x\n" for i in range(1, 4)) + "".join(f"S {i} 3 | g | w\n" for i in range(4, 9))
+def test_assemble_caps_each_column_separately():
+    a = [_post(str(i)) for i in range(1, 15)]
+    reply = "# T\n" + "".join(f"R {i} 3 | g | w | x\n" for i in range(1, 8)) + "".join(f"S {i} 3 | g | w\n" for i in range(8, 15))
     res = assemble(parse_picks(reply), {i + 1: p for i, p in enumerate(a)}, {"T": a})[0]
-    assert len(res["reply"]) == 3 and len(res["save"]) == MAX_PER_TOPIC - 3
+    assert len(res["reply"]) == MAX_PER_COLUMN and len(res["save"]) == MAX_PER_COLUMN
+
+
+def test_assemble_moves_old_reply_pick_to_save():
+    a = [_post("old", age=25 * 60), _post("new", age=60)]
+    res = assemble(parse_picks("# T\nR 1 4 | g | w | x\nR 2 4 | g | w | x\n"), {1: a[0], 2: a[1]}, {"T": a})[0]
+    assert [p["id"] for p in res["reply"]] == ["new"]
+    assert [p["id"] for p in res["save"]] == ["old"] and res["save"][0]["angle"] == ""
+
+
+def test_is_junk():
+    for text in ("Giving away 5x $100 in sol! 1.Follow @x 2. Like & RT this post", "Drop your $SOLANA address",
+                 "I want to send some $sol to 5 people that turn my notifications on", "$500 for 5 people who retweet and comment"):
+        assert is_junk(text), text
+    for text in ("The exploit drained the wallet in two blocks", "We dropped the index and latency fell", "Follow-up on the Postgres postmortem"):
+        assert not is_junk(text), text
+
+
+def test_select_candidates_keeps_room_for_fresh_posts():
+    old = [_post(f"o{i}", age=20 * 60, score=90) for i in range(40)]
+    fresh = [_post(f"f{i}", age=60, score=10) for i in range(40)]
+    picked = select_candidates(old + fresh, limit=20)
+    assert sum(p["id"].startswith("f") for p in picked) >= 8
 
 
 def test_select_candidates_filters_and_dedupes():

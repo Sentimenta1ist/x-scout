@@ -1,4 +1,4 @@
-"""scrape → score → pick candidates → claude -p → up to 5 posts per topic: reply / save."""
+"""scrape → score → pick candidates → claude -p → up to 5 posts to reply to and 5 to save per topic."""
 import asyncio
 import json
 import time
@@ -74,7 +74,7 @@ def fallback_columns(candidates):
     """Used when Claude fails: top posts by local score under "save", so the run still shows something."""
     out = []
     for name, posts in candidates.items():
-        top = sorted(posts, key=lambda p: p["scored"]["score"], reverse=True)[:analyze.MAX_PER_TOPIC]
+        top = sorted(posts, key=lambda p: p["scored"]["score"], reverse=True)[:analyze.MAX_PER_COLUMN]
         out.append({"topic": name, "candidates": len(posts), "reply": [],
                     "save": [{**analyze.slim(p), "why": "", "angle": "", "q": None} for p in top]})
     return out
