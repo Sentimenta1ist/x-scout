@@ -30,7 +30,7 @@ Output plain text only, no markdown, exactly this format, best first:
 R <n> <q> | <gist> | <why> | <angle>
 S <n> <q> | <gist> | <why>
 q = depth/quality 1-5. gist: what the post says, 1-2 short sentences in {gist_lang}, so the reader can skip the full text; keep key numbers and names.
-why: <=12 words, concrete, no filler. angle (R only): <=14 words, what exactly the reader could reply."""
+why: <=12 words, concrete, no filler. angle (R only): the actual reply text, ready to send, in the language of the post, <=20 words."""
 
 
 def ranking_system(gist_lang="English"):
