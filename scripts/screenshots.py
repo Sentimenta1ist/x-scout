@@ -2,7 +2,8 @@
 
     X_SCOUT_DATA=./demo-data uv run python scripts/demo.py
     X_SCOUT_DATA=./demo-data PORT=8798 uv run x-scout   # in another terminal
-    uv run python scripts/screenshots.py http://127.0.0.1:8798
+    uv run python scripts/screenshots.py http://127.0.0.1:8798          # all images
+    uv run python scripts/screenshots.py http://127.0.0.1:8798 profile  # only the profile panel
 """
 import asyncio
 import json
@@ -32,7 +33,7 @@ async def shot(browser, base, name, scheme, state, width=1440, height=1000, full
     await page.close()
 
 
-async def main(base):
+async def main(base, only=None):
     OUT.mkdir(parents=True, exist_ok=True)
 
     async def open_settings(page):
@@ -41,16 +42,27 @@ async def main(base):
     async def open_log(page):
         await page.click("#logBtn")
 
+    def open_tab(label):
+        async def go(page):
+            if not await page.is_visible("#pfPanel"):
+                await page.click("#pfToggle")
+            await page.wait_for_timeout(300)
+            await page.click(f"#pfTabs button:has-text('{label}')")
+        return go
+
     async with async_playwright() as pw:
         b = await pw.chromium.launch(channel="chrome", headless=True)
-        await shot(b, base, "board-dark", "dark", IDLE)
-        await shot(b, base, "board-light", "light", IDLE)
-        await shot(b, base, "running", "dark", RUNNING, height=520, before=open_log)
-        await shot(b, base, "settings", "dark", IDLE, height=640, before=open_settings)
-        await shot(b, base, "mobile", "dark", IDLE, width=390, height=844)
+        if only != "profile":
+            await shot(b, base, "board-dark", "dark", IDLE)
+            await shot(b, base, "board-light", "light", IDLE)
+            await shot(b, base, "running", "dark", RUNNING, height=520, before=open_log)
+            await shot(b, base, "settings", "dark", IDLE, height=640, before=open_settings)
+            await shot(b, base, "mobile", "dark", IDLE, width=390, height=844)
+        await shot(b, base, "profile-growth", "dark", IDLE, before=open_tab("Growth"))
+        await shot(b, base, "profile-repeat", "dark", IDLE, before=open_tab("Repeat for me"))
         await b.close()
     print("written to", OUT)
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8798"))
+    asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8798", sys.argv[2] if len(sys.argv) > 2 else None))

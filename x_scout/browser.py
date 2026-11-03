@@ -13,7 +13,7 @@ from urllib.parse import quote
 from playwright.async_api import async_playwright
 
 from .config import BROWSER_PROFILE
-from .parse import posts_from_search
+from .parse import posts_from_search, profile_from_user, timeline_page
 
 _lock = asyncio.Lock()  # one Chrome per profile dir at a time
 
@@ -163,3 +163,116 @@ async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_st
         finally:
             await ctx.close()
     return out
+
+
+_GRAPHQL_OP = re.compile(r"/graphql/[^/]+/(\w+)")
+# X renames these operations; older names stay so a rollback or A/B bucket still works
+POST_OPS = ("UserOriginalsTimeline", "UserTweets")
+REPLY_OPS = ("UserRepliesTimeline", "UserTweetsAndReplies")
+
+
+def page_reached_cutoff(page_posts, cutoff_iso):
+    """Stop paginating once a whole page is older than the cutoff. Uses the page's newest post, because a pinned post
+    or an old thread start in a conversation module must not end the scrape early."""
+    dates = [p["created_at"] for p in page_posts if p.get("created_at") and not p.get("pinned")]
+    return bool(dates) and max(dates) < cutoff_iso
+
+
+async def _read_timeline(page, url, ops, handle, target, cutoff_iso, sink, log, on_page):
+    """Scroll one profile tab, reading only `ops` responses. Everything captured goes to `sink` right away,
+    so a Stop or a 429 keeps what was already read."""
+    counted = {"own": 0, "stale": 0, "done": False, "status": None, "limited": False}
+
+    async def on_response(resp):
+        m = _GRAPHQL_OP.search(resp.url)
+        if not m:
+            return
+        if resp.status == 429:
+            counted["limited"] = True
+        name = m.group(1)
+        if name == "UserByScreenName":
+            if resp.status == 200:
+                try:
+                    data = await resp.json()
+                    prof = profile_from_user(data)
+                except Exception:
+                    return
+                if prof and prof["handle"].lower() == handle.lower():
+                    sink["profile"] = prof
+                    sink["responses"].append({"op": name, "data": data})
+                elif sink["profile"] is None and not prof:
+                    sink["missing"] = True
+            return
+        if name not in ops:
+            return
+        counted["status"] = resp.status
+        if resp.status != 200:
+            return
+        try:
+            data = await resp.json()
+            pg = timeline_page(data, handle)
+        except Exception:
+            return
+        sink["responses"].append({"op": name, "data": data})
+        sink["posts"].extend(pg["posts"])
+        sink["accounts"].update(pg["accounts"])
+        sink["retweets"] += pg["retweets"]
+        counted["own"] += len(pg["posts"])
+        if page_reached_cutoff(pg["posts"], cutoff_iso):
+            counted["done"] = True
+        on_page()
+
+    def check():
+        if counted["limited"]:
+            raise RateLimited()
+        if "/login" in page.url or "/i/flow" in page.url or counted["status"] == 401:
+            raise NeedLogin()
+
+    page.on("response", on_response)
+    try:
+        await page.goto(url, wait_until="domcontentloaded")
+        await asyncio.sleep(random.uniform(3, 6))
+        check()
+        scrolls = 0
+        while counted["own"] < target and not counted["done"] and counted["stale"] < 4:
+            before = counted["own"]
+            await page.mouse.wheel(0, random.randint(2500, 4000))
+            scrolls += 1
+            # human pace: 3-7 s between scrolls, a longer 8-15 s break every few
+            await asyncio.sleep(random.uniform(8, 15) if scrolls % 6 == 0 else random.uniform(3, 7))
+            check()
+            counted["stale"] = counted["stale"] + 1 if counted["own"] == before else 0
+        if counted["status"] is None:
+            log(f"  {ops[0]}: X returned no timeline data (logged out, or X renamed the operation?)")
+    finally:
+        page.remove_listener("response", on_response)
+    return counted["own"]
+
+
+async def scrape_profile(handle, sink, max_posts=300, max_days=120, max_replies=60, headless=True, log=print,
+                         on_progress=lambda phase, n: None):
+    """Read one account into `sink`: {"profile", "posts", "accounts", "retweets", "responses"}. Read-only: scrolls and reads JSON.
+    Raises NeedLogin / RateLimited / LookupError; what was read before that stays in `sink`."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_days)).isoformat()
+    async with _lock, async_playwright() as pw:
+        ctx = await _context(pw, headless=headless)
+        try:
+            if not any(c["name"] == "auth_token" for c in await ctx.cookies("https://x.com")):
+                raise NeedLogin()
+            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            log(f"@{handle}: reading posts (up to {max_posts} or {max_days} days)")
+            await _read_timeline(page, f"https://x.com/{handle}", POST_OPS, handle, max_posts, cutoff, sink, log,
+                                 lambda: on_progress("posts", len(sink["posts"])))
+            if not sink["profile"]:
+                raise LookupError(f"@{handle}: account not found or unavailable" if sink.get("missing")
+                                  else f"@{handle}: X returned no profile data (logged out or page changed?)")
+            own = len(sink["posts"])
+            log(f"@{handle}: {own} posts read")
+            if max_replies > 0 and not sink["profile"]["protected"]:
+                await asyncio.sleep(random.uniform(8, 15))
+                log(f"@{handle}: reading replies (up to {max_replies})")
+                await _read_timeline(page, f"https://x.com/{handle}/with_replies", REPLY_OPS, handle, max_replies,
+                                     cutoff, sink, log, lambda: on_progress("replies", len(sink["posts"]) - own))
+        finally:
+            await ctx.close()
+    return sink

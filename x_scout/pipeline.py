@@ -2,11 +2,11 @@
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from . import analyze, browser, db
+from . import analyze, browser, db, profile_analysis, profile_metrics, profile_store
 from .config import PROFILE_MD, ROOT, SETTINGS_JSON
-from .parse import age_minutes
+from .parse import age_minutes, finalize_timeline
 from .scoring import project_views, score
 
 DEFAULT_SETTINGS = {
@@ -17,11 +17,18 @@ DEFAULT_SETTINGS = {
     "headless": True,
     "model": "sonnet",
     "gist_lang": "English",  # language of the short per-post summary
+    # profile analysis
+    "profile_max_posts": 300,
+    "profile_max_days": 120,
+    "profile_max_replies": 60,   # 0 = skip the replies tab
+    "profile_model": "sonnet",
 }
 MAX_TOPICS = 5
 
 # live state of the current run, polled by the UI
-state = {"running": False, "run_id": None, "step": "", "log": [], "progress": 0.0, "eta_s": None, "started": None}
+# kind: "run" (topic search) or "profile" (profile analysis); one job at a time, they share Chrome and Stop
+state = {"running": False, "kind": "run", "run_id": None, "step": "", "log": [], "progress": 0.0, "eta_s": None, "started": None,
+         "handle": None, "analysis_id": None, "error": None}
 _task = None  # asyncio task of the current run, for Stop
 
 
@@ -112,7 +119,7 @@ async def run(settings):
     global _task
     _task = asyncio.current_task()
     topics = settings["topics"][:MAX_TOPICS]
-    state.update(running=True, step="starting", log=[], progress=0.0, eta_s=_eta(len(topics)), started=time.time())
+    state.update(running=True, kind="run", step="starting", log=[], progress=0.0, eta_s=_eta(len(topics)), started=time.time())
     t0 = time.time()
     stats = {}
     run_id = db.create_run(topics)
@@ -182,7 +189,7 @@ async def reanalyze(run_id, settings):
     src = db.get_run(run_id)
     if not src or not src.get("candidates"):
         raise ValueError("run has no stored candidates")
-    state.update(running=True, step="Claude is ranking stored posts", log=[], progress=0.5, eta_s=20, started=time.time())
+    state.update(running=True, kind="run", step="Claude is ranking stored posts", log=[], progress=0.5, eta_s=20, started=time.time())
     new_id = db.create_run(src["topics"])
     state["run_id"] = new_id
     try:
@@ -201,3 +208,137 @@ async def reanalyze(run_id, settings):
         db.finish_run(new_id, "error", stats={"error": str(e)[:500]})
     finally:
         state.update(running=False, step="", progress=1.0)
+
+
+# ---- profile analysis ----
+
+def _profile_eta(settings):
+    """~18 posts per scroll page at ~6 s a page, plus the replies tab and one Claude call."""
+    pages = (settings["profile_max_posts"] + settings["profile_max_replies"]) / 18
+    return round(pages * 6 + 90)
+
+
+def _build_analysis(handle, scrape_id, scrape, settings, status):
+    """Local metrics, optionally one Claude call. Claude failing keeps the metrics: the tabs still work and Re-analyze can retry."""
+    rows, metrics = profile_metrics.compute(scrape["posts"], scrape["profile"])
+    return {"id": profile_store.new_id(), "scrape_id": scrape_id, "created_at": db.now_iso(), "status": status,
+            "profile": scrape["profile"], "metrics": metrics, "posts": rows, "report": None,
+            "stats": {"posts": len(rows), "scrape_s": scrape.get("scrape_s")}}
+
+
+def _claude_report(analysis, settings):
+    prompt, index = profile_analysis.digest(load_profile(), analysis["profile"], analysis["metrics"], analysis["posts"])
+    system = profile_analysis.system_prompt(settings["gist_lang"])
+    _log(f"claude -p ({settings['profile_model']}): {len(index)} posts, ~{len(prompt) // 4} tokens of input")
+    text, usage = analyze.run_claude(prompt, model=settings["profile_model"], system=system, raw=True)
+    _log(f"claude done: in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
+    report = profile_analysis.resolve(profile_analysis.parse_report(text), index, analysis["posts"])
+    if report["copies_dropped"]:
+        _log(f"dropped {report['copies_dropped']} items that repeated text of a post")
+    return report, usage
+
+
+def _analyze_step(analysis, settings, t0):
+    try:
+        analysis["report"], analysis["stats"]["claude"] = _claude_report(analysis, settings)
+    except Exception as e:
+        _log(f"claude failed, metrics are kept, use Re-analyze: {e}")
+        analysis["stats"]["claude_error"] = str(e)[:500]
+    analysis["stats"]["total_s"] = round(time.time() - t0)
+
+
+def _finish_profile(handle, analysis_id=None, error=None):
+    state.update(running=False, step="", progress=1.0, analysis_id=analysis_id, error=error)
+
+
+async def analyze_profile(handle, settings):
+    """Scrape one account → metrics → one Claude call. Stop, 429 or a lost session keep what was read, without the Claude call."""
+    global _task
+    _task = asyncio.current_task()
+    state.update(running=True, kind="profile", handle=handle, analysis_id=None, error=None, run_id=None, step="opening X", log=[],
+                 progress=0.0, eta_s=_profile_eta(settings), started=time.time())
+    t0 = time.time()
+    scrape_id = profile_store.new_id()
+    sink = {"profile": None, "posts": [], "accounts": {}, "retweets": 0, "responses": []}
+    max_posts, max_replies = settings["profile_max_posts"], settings["profile_max_replies"]
+    total = max(max_posts + max_replies, 1)
+
+    def on_progress(tab, n):
+        done = n if tab == "posts" else max_posts + n
+        _progress(min(done, total) * 0.85, total, f"@{handle}: {n} {tab}")
+
+    def keep(status):
+        """Save what the scrape got: scrape file, snapshot and a metrics-only analysis. Returns the analysis or None."""
+        if not sink["profile"]:
+            return None
+        posts = finalize_timeline(sink["posts"], sink["accounts"])
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=settings["profile_max_days"])).isoformat()
+        pinned = next((p for p in posts if p["pinned"]), None)
+        profile = {**sink["profile"], "pinned_text": pinned["text"] if pinned else None, "pinned_url": pinned["url"] if pinned else None}
+        posts = [p for p in posts if (p["created_at"] or "") >= cutoff]
+        scrape = {"id": scrape_id, "scraped_at": db.now_iso(), "status": status, "profile": profile, "posts": posts,
+                  "retweets": sink["retweets"], "accounts": sink["accounts"], "scrape_s": round(time.time() - t0)}
+        profile_store.save_scrape(handle, scrape_id, scrape, sink["responses"])
+        analysis = _build_analysis(handle, scrape_id, scrape, settings, status)
+        profile_store.add_snapshot(handle, profile_metrics.snapshot(profile, analysis["metrics"], scrape_id, scrape["scraped_at"]))
+        return analysis
+
+    def partial(status, message):
+        _log(message)
+        a = keep(status)
+        if a and not a["posts"]:
+            a = None  # the snapshot is saved, but an empty record would only clutter history
+        if a:
+            a["stats"]["total_s"] = round(time.time() - t0)
+            profile_store.save_analysis(handle, a)
+            _log(f"kept {a['stats']['posts']} posts: Re-analyze runs Claude on them without scraping")
+        _finish_profile(handle, a["id"] if a else None, status)
+
+    try:
+        await browser.scrape_profile(handle, sink, max_posts=max_posts, max_days=settings["profile_max_days"], max_replies=max_replies,
+                                     headless=settings["headless"], log=_log, on_progress=on_progress)
+        if not sink["posts"]:  # nothing to analyze: keep the snapshot, don't pay for a Claude call
+            keep("empty")
+            raise LookupError(f"@{handle}: X returned no posts (private, empty, or X renamed the timeline operation?)")
+        analysis = keep("done")
+        _progress(0.87, 1, f"Claude is analyzing @{handle}")
+        await asyncio.to_thread(_analyze_step, analysis, settings, t0)
+        profile_store.save_analysis(handle, analysis)
+        _log(f"done in {analysis['stats']['total_s']}s")
+        _finish_profile(handle, analysis["id"])
+    except asyncio.CancelledError:
+        partial("stopped", "stopped")
+    except browser.NeedLogin:
+        partial("need_login", "X asks to log in: press 'Log in to X' and retry")
+    except browser.RateLimited:
+        partial("rate_limited", "X rate limit (429): stopped. Wait an hour before the next run.")
+    except LookupError as e:
+        _log(str(e))
+        _finish_profile(handle, error=str(e))
+    except Exception as e:
+        _log(f"error: {e!r}")
+        _finish_profile(handle, error=str(e)[:500])
+
+
+async def reanalyze_profile(handle, analysis_id, settings):
+    """Metrics and Claude again on the stored scrape of an analysis. No X traffic."""
+    global _task
+    _task = asyncio.current_task()
+    src = profile_store.load_analysis(handle, analysis_id)
+    state.update(running=True, kind="profile", handle=handle, analysis_id=None, error=None, run_id=None, log=[], progress=0.5,
+                 step=f"Claude is analyzing @{handle}", eta_s=90, started=time.time())
+    t0 = time.time()
+    try:
+        scrape = profile_store.load_scrape(handle, src["scrape_id"])
+        analysis = _build_analysis(handle, src["scrape_id"], scrape, settings, "done")
+        analysis["stats"]["reanalyzed_from"] = analysis_id
+        await asyncio.to_thread(_analyze_step, analysis, settings, t0)
+        profile_store.save_analysis(handle, analysis)
+        _log("done")
+        _finish_profile(handle, analysis["id"])
+    except asyncio.CancelledError:
+        _log("stopped")
+        _finish_profile(handle, error="stopped")
+    except Exception as e:
+        _log(f"error: {e!r}")
+        _finish_profile(handle, error=str(e)[:500])

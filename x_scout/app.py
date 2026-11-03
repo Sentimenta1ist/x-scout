@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import browser, db, pipeline
+from . import browser, db, pipeline, profile_store
 from .config import PORT, PROFILE_MD, ROOT
 
 STATIC = ROOT / "x_scout" / "static"
@@ -128,6 +128,47 @@ def run(run_id: int):
         raise HTTPException(404)
     r["has_candidates"] = bool(r.pop("candidates", None))
     return r
+
+
+def _handle(raw):
+    try:
+        return profile_store.clean_handle(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/profiles/analyze")
+async def analyze_profile(body: dict = Body(...)):
+    _busy()
+    handle = _handle(body.get("handle"))
+    _spawn(pipeline.analyze_profile(handle, pipeline.load_settings()))
+    return {"ok": True, "handle": handle}
+
+
+@app.get("/api/profiles")
+def profiles():
+    return profile_store.history()
+
+
+@app.get("/api/profiles/{handle}/analyses/{analysis_id}")
+def profile_analysis(handle: str, analysis_id: str):
+    handle = _handle(handle)
+    try:
+        return {**profile_store.load_analysis(handle, analysis_id), "snapshots": profile_store.snapshots(handle)}
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "no such analysis")
+
+
+@app.post("/api/profiles/{handle}/analyses/{analysis_id}/reanalyze")
+async def profile_reanalyze(handle: str, analysis_id: str):
+    _busy()
+    handle = _handle(handle)
+    try:
+        profile_store.load_analysis(handle, analysis_id)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "no such analysis")
+    _spawn(pipeline.reanalyze_profile(handle, analysis_id, pipeline.load_settings()))
+    return {"ok": True}
 
 
 def main():

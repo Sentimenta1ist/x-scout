@@ -6,9 +6,10 @@
 All accounts and posts below are made up.
 """
 import json
+import random
 from datetime import datetime, timedelta, timezone
 
-from x_scout import db
+from x_scout import db, profile_metrics, profile_store
 from x_scout.config import PROFILE_MD, ROOT, SETTINGS_JSON
 
 NOW = datetime.now(timezone.utc)
@@ -121,6 +122,70 @@ def post(topic, i, row):
     }
 
 
+PROFILE_DEMO = {"handle": "mira_builds", "name": "Mira Okafor", "bio": "Ships small agents for boring back-office work. Notes on evals and failures.",
+                "followers": 18400, "following": 410, "posts_total": 3120, "joined": "2021-03-14T09:00:00+00:00", "verified": True,
+                "protected": False, "pinned_id": None, "pinned_text": None, "pinned_url": None}
+HOOKS = ["We put an eval harness in front of every tool call.", "Three failures from last week, with the logs.", "A 180-line loop replaced our framework.",
+         "What I would not automate again.", "Invoice intake: the numbers after 30 days.", "Why our agent got slower after the fix."]
+
+
+def demo_profile():
+    """A fictional account: 110 days, a median that steps up twice, a few breakouts and one article chain."""
+    rnd = random.Random(7)
+    posts, n = [], 0
+    for d in range(110, 2, -1):
+        for _ in range(rnd.choice((0, 1, 1, 2))):
+            n += 1
+            base = 900 if d > 70 else 2600 if d > 30 else 6800
+            hit = rnd.random() < 0.06
+            views = int(base * rnd.uniform(0.5, 1.6) * (rnd.uniform(6, 14) if hit else 1))
+            kind = rnd.choices(("post", "quote", "thread"), (7, 2, 1))[0]
+            likes = int(views * rnd.uniform(0.008, 0.03))
+            t = NOW - timedelta(days=d, hours=rnd.randint(0, 20))
+            post = {"id": f"p{n}", "url": f"https://x.com/mira_builds/status/p{n}", "created_at": t.isoformat(), "text": rnd.choice(HOOKS), "type": kind,
+                    "media_type": rnd.choice(("none", "none", "photo", "video")), "has_link": rnd.random() < 0.2, "views": views, "likes": likes,
+                    "replies": likes // 8, "reposts": likes // 6, "quotes": likes // 20, "bookmarks": int(likes * rnd.uniform(0.2, 0.9)), "self_reply": False}
+            if kind == "quote":
+                post.update(quoted_id=f"q{n}", quoted_handle="frontierweekly", quoted_followers=412000)
+            posts.append(post)
+    posts.sort(key=lambda p: p["created_at"])
+    art = posts[len(posts) // 2]
+    art.update(type="article", article_id="a1", article_title="How we test agents before a client sees them", views=art["views"] * 12)
+    q = posts[len(posts) // 2 + 1]
+    q.update(type="quote", quoted_id=art["id"], quoted_handle="mira_builds", quoted_followers=18400)
+    return posts
+
+
+def demo_report(rows):
+    top = sorted((p for p in rows if p["ratio"]), key=lambda p: p["ratio"], reverse=True)
+    phases = profile_metrics.growth_phases(rows)
+    conf = ["guess", "medium", "high"]
+    return {
+        "summary": ["Fictional builder writing about agents in production for small businesses.", "Audience: engineers and operators; the median has stepped up twice.",
+                    "Mid-size account growing through specific failure stories."],
+        "phases": [{"start": ph["start"][:10], "end": ph["end"][:10], "confidence": conf[min(i, 2)], "changed": "Moved from opinions to posts with numbers and logs.",
+                    "trigger": "A long article followed by quotes of it.", "post_ids": [p["id"] for p in top[i:i + 2]]} for i, ph in enumerate(phases)],
+        "viral": [{"post_id": p["id"], "hook": "Number in the first line", "format": "Short post with a screenshot", "topic": "Agent evals", "timing": "Weekday morning UTC", "borrowed": "",
+                   "why": "A concrete before-and-after anyone building agents can check."} for p in top[:10]],
+        "hooks": ["Before and after number", "Failure confession with a log"], "openers": ["We [changed X] and [metric] moved from [A] to [B]."],
+        "structures": ["Claim, proof screenshot, what to copy"], "ctas": ["Ask for one similar case"], "flops": ["Bare links: median far below typical"],
+        "repeat": [{"item": "Publish one automation failure with the number that exposed it", "test": "Three posts this week; compare median views with the last 30.", "post_ids": [top[0]["id"]]},
+                   {"item": "Write one long piece, then quote it twice with new angles", "test": "One article, two quotes in 7 days; count profile visits.", "post_ids": [top[1]["id"]]},
+                   {"item": "Open with the client's manual hours, not the tool", "test": "Two posts; compare replies from business owners.", "post_ids": []}],
+        "dont": [{"tactic": "Giveaways for reposts", "why": "Attracts the wrong audience and risks a ban."}], "copies_dropped": 0,
+    }
+
+
+def seed_profile():
+    rows, metrics = profile_metrics.compute(demo_profile(), PROFILE_DEMO)
+    handle, ts = PROFILE_DEMO["handle"], NOW.isoformat()
+    profile_store.add_snapshot(handle, {"scrape_id": "20260901-090000", "ts": (NOW - timedelta(days=30)).isoformat(), "followers": 16100, "following": 402, "posts_total": 3060, "median_views_30": 2500})
+    profile_store.add_snapshot(handle, profile_metrics.snapshot(PROFILE_DEMO, metrics, "20261001-090000", ts))
+    profile_store.save_scrape(handle, "20261001-090000", {"id": "20261001-090000", "scraped_at": ts, "status": "done", "profile": PROFILE_DEMO, "posts": demo_profile(), "scrape_s": 214})
+    profile_store.save_analysis(handle, {"id": "20261001-090500", "scrape_id": "20261001-090000", "created_at": ts, "status": "done", "profile": PROFILE_DEMO, "metrics": metrics, "posts": rows, "report": demo_report(rows),
+                                         "stats": {"posts": len(rows), "scrape_s": 214, "total_s": 262, "claude": {"input_tokens": 14200, "output_tokens": 3100, "cost_usd_equiv": 0.09, "duration_s": 47}}})
+
+
 def main():
     db.init()
     topics = [{"name": t, "query": ""} for t in DEMO]
@@ -140,7 +205,8 @@ def main():
     })
     SETTINGS_JSON.write_text(json.dumps({"topics": topics}, indent=2))
     PROFILE_MD.write_text((ROOT / "profile.example.md").read_text())
-    print(f"demo run #{run_id} written")
+    seed_profile()
+    print(f"demo run #{run_id} and profile @{PROFILE_DEMO['handle']} written")
 
 
 if __name__ == "__main__":

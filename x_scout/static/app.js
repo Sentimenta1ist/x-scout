@@ -47,6 +47,10 @@ const ICON = {
   reply: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/>',
   bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><path d="M12 7v6"/><path d="M15 10H9"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  "user-search": '<circle cx="10" cy="7" r="4"/><path d="M10.3 15H7a4 4 0 0 0-4 4v2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-1.9-1.9"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  "triangle-alert": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" class="ic" aria-hidden="true">${ICON[name]}</svg>`;
 const hue = (str) => [...str].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
@@ -180,7 +184,8 @@ async function refresh() {
     $("reBtn").disabled = busy || !(current && current.has_candidates);
     $("runBtn").classList.toggle("hidden", s.running);
     $("stopBtn").classList.toggle("hidden", !s.running);
-    $("progress").classList.toggle("hidden", !s.running && !logOpen);
+    const topJob = !s.running || s.kind !== "profile";  // a profile job shows its progress in the panel
+    $("progress").classList.toggle("hidden", (!s.running && !logOpen) || !topJob);
     $("step").textContent = s.running ? `${s.step || "starting"}…` : "Last run finished";
     document.querySelector(".spinner").style.display = s.running ? "" : "none";
     $("progress").classList.toggle("done", !s.running);
@@ -193,9 +198,10 @@ async function refresh() {
     } else $("timing").textContent = "";
     $("log").textContent = (s.log || []).join("\n");
     $("log").scrollTop = 1e9;
-    if (wasRunning && !s.running) await loadRuns(s.run_id);
-    else if (s.running && s.run_id && $("runSelect").value != s.run_id) await loadRuns(s.run_id);
+    if (wasRunning && !s.running && s.kind !== "profile") await loadRuns(s.run_id);
+    else if (s.running && s.kind !== "profile" && s.run_id && $("runSelect").value != s.run_id) await loadRuns(s.run_id);
     wasRunning = s.running;
+    if (window.profilePanel) await window.profilePanel.onState(s);
   } catch {}
 }
 async function loop() { await refresh(); setTimeout(loop, wasRunning ? 1000 : 4000); }
@@ -219,6 +225,7 @@ async function openSettings() {
   s.topics.forEach((t) => $("topics").appendChild(topicRow(t)));
   $("lang").value = s.lang; $("perMode").value = s.per_mode; $("cands").value = s.candidates;
   $("model").value = s.model; $("headless").checked = s.headless; $("gistLang").value = s.gist_lang;
+  $("pfPosts").value = s.profile_max_posts; $("pfDays").value = s.profile_max_days; $("pfReplies").value = s.profile_max_replies;
   $("profile").value = p.text;
   $("saveMsg").textContent = p.custom ? "" : "Profile is the example: edit it to describe yourself.";
   panel.classList.remove("hidden");
@@ -232,6 +239,8 @@ async function saveSettings() {
   await post("/api/settings", {
     topics, lang: $("lang").value.trim(), per_mode: +$("perMode").value || 30, candidates: +$("cands").value || 25,
     model: $("model").value, headless: $("headless").checked, gist_lang: $("gistLang").value.trim() || "English",
+    profile_max_posts: +$("pfPosts").value || 300, profile_max_days: +$("pfDays").value || 120,
+    profile_max_replies: $("pfReplies").value === "" ? 60 : +$("pfReplies").value,
   });
   await post("/api/profile", { text: $("profile").value });
   $("saveMsg").textContent = "Saved.";

@@ -19,6 +19,7 @@
       <button id="reBtn" class="ghost" title="Run Claude again on this run's posts, no scraping">Re-analyze</button>
       <button id="logBtn" class="ghost">Log</button>
       <button id="settingsBtn" class="ghost">Settings</button>
+      <button id="pfToggle" class="ghost" title="Analyze an X account">Profiles</button>
       <button id="runBtn" class="primary">Run</button>
       <button id="stopBtn" class="ghost hidden" title="Stop this run. Posts scraped so far are not kept">Stop</button>
     </div>
@@ -48,6 +49,10 @@
         <label>Model <select id="model"><option>sonnet</option><option>haiku</option><option>opus</option></select></label>
         <label>Summary language <input id="gistLang" size="10" placeholder="English"></label>
         <label class="row"><input id="headless" type="checkbox"> run browser hidden (headless)</label>
+        <h3>Profile analysis</h3>
+        <label>Posts to read, at most <input id="pfPosts" type="number" min="20" max="1000"></label>
+        <label>Days back, at most <input id="pfDays" type="number" min="7" max="730"></label>
+        <label>Replies to read (0 = skip) <input id="pfReplies" type="number" min="0" max="300"></label>
       </div>
       <div>
         <h3>About me <small>(Claude uses it to pick posts to reply to and to read)</small></h3>
@@ -71,6 +76,30 @@
          3. Press <b>Run</b>. Takes a few minutes: search is paced like a person.</p>
     </div>
   </main>
+  <aside id="pfPanel" class="pf hidden" aria-label="Profile analysis">
+    <header class="pf-head">
+      <h2>Profile analysis</h2>
+      <button id="pfClose" class="link" title="Collapse panel" aria-label="Collapse panel"></button>
+    </header>
+    <form id="pfForm" class="pf-form">
+      <input id="pfHandle" placeholder="X handle, e.g. some_builder" autocomplete="off" spellcheck="false" aria-label="X handle">
+      <button id="pfGo" class="primary" type="submit">Analyze</button>
+      <button id="pfStop" class="ghost hidden" type="button" title="Stop. Posts read so far are kept">Stop</button>
+    </form>
+    <div class="pf-history">
+      <select id="pfHistory" title="Analyzed profiles" aria-label="Analyzed profiles"></select>
+      <button id="pfRe" class="ghost" title="Run the analysis again on the stored posts, no scraping">Re-analyze</button>
+    </div>
+    <section id="pfProgress" class="pf-progress hidden">
+      <div class="progress-head"><span class="spinner"></span><b id="pfStep"></b><span id="pfTiming" class="hint"></span></div>
+      <div class="bar"><div id="pfBar" class="bar-fill"></div></div>
+      <pre id="pfLog" class="log"></pre>
+    </section>
+    <div id="pfMeta" class="summary"></div>
+    <nav id="pfTabs" class="tabs"></nav>
+    <div id="pfBody" class="pf-body"></div>
+  </aside>
   <script src="/static/app.js"></script>
+  <script src="/static/profile.js"></script>
 </body>
 </html>

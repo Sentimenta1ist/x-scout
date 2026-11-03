@@ -40,6 +40,34 @@ Every card has Claude's one-line take, a 1–2 sentence summary of the post (in 
 - **"Seen" marks**, light and dark theme, works on a phone-width window.
 - Everything stays on your machine: SQLite, browser profile and settings live in `data/`.
 
+## Profile analysis
+
+Open **Profiles**, type an X handle, press **Analyze**. You get a breakdown of that account: which posts went viral and why, how its reach grew, and what you can repeat on your own account. Read-only, same pace and stop rules as search.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/img/profile-growth.png" alt="Growth tab: views per post, rolling medians, breakouts and inferred phases"></td>
+<td width="50%"><img src="docs/img/profile-repeat.png" alt="Repeat for me tab: a checklist of tactics with a one-week test for each"></td>
+</tr>
+</table>
+
+| Tab | What is there |
+|---|---|
+| **Overview** | Bio, key numbers, Claude's summary, format mix, posting hours, article chains, borrowed reach |
+| **Growth** | Views per post on a log scale, 7- and 30-post medians, breakouts, phases with confidence, snapshot comparison |
+| **Viral posts** | Top 10 with link, numbers and why each worked |
+| **Patterns** | Hooks, opening lines as templates, structures, CTAs, what flops |
+| **Repeat for me** | 5–8 tactics adapted to your About me, each with a one-week test; plus what not to copy |
+| **Raw** | Sortable table of every post, CSV export |
+
+- **Scrape:** up to 300 posts or 120 days, whichever comes first, plus up to 60 replies. All three limits are in Settings. Takes a few minutes.
+- **Metrics are local.** A breakout is a post with at least 5× the median views of the previous 30 original posts.
+- **Growth is inference.** X does not expose follower history, so phases come from steps in the views median and are labeled as such. Every scrape saves a snapshot (followers, following, posts), so a real history builds up and any two snapshots can be compared.
+- **One `claude -p` call** (Sonnet by default) on the metrics, the top ~40 posts by breakout ratio and ~20 typical ones. It suggests structures and tactics, never copied text; items that repeat 8+ words of a post are dropped.
+- **Stop, a 429 or a lost session keep what was read**, without calling Claude. **Re-analyze** runs Claude on stored posts with no X traffic.
+
+## Screens
+
 <table>
 <tr>
 <td width="50%"><img src="docs/img/running.png" alt="Run in progress with progress bar, ETA and log"></td>
@@ -112,6 +140,7 @@ X_SCOUT_DATA=./demo-data uv run x-scout
 | Model | `sonnet` | `haiku` is cheaper, `opus` is more thorough. |
 | Summary language | `English` | Language of the short per-post summary, e.g. `Russian`. |
 | Headless | on | Turn off to watch the browser work. |
+| Profile analysis limits | 300 posts, 120 days, 60 replies | How far back the Profiles panel reads. Replies `0` skips that tab. |
 
 Optional `.env` (see [`.env.example`](.env.example)): `PORT`, `CLAUDE_BIN`, `CLAUDE_MODEL`, `X_SCOUT_DATA`.
 
@@ -143,25 +172,29 @@ Everything is local and gitignored, in `data/`:
 | `x-scout.db` | Posts, metric snapshots (for acceleration and author baselines), runs |
 | `browser-profile/` | The Chrome profile with your X session |
 | `settings.json`, `profile.md` | Your topics and About me |
+| `profiles/<handle>/` | Scrapes (parsed posts + raw X JSON, gzipped), analyses, `snapshots.jsonl` |
 
 The only network traffic is Chrome talking to x.com and the Claude CLI talking to Anthropic.
 
 ## Development
 
 ```bash
-uv run pytest                                   # parser, scoring, candidate selection, reply parsing
+uv run pytest                                   # parsers, scoring, candidate selection, profile metrics, reply parsing
 uv run python scripts/screenshots.py <url>      # re-render docs/img from a running demo server
 ```
 
 ```
 x_scout/
   browser.py    Playwright, persistent profile, search + response capture
-  parse.py      SearchTimeline JSON → flat posts (handles X schema variants)
+  parse.py      SearchTimeline and profile JSON → flat posts (handles X schema variants)
   scoring.py    virality score (ported from x-viral-radar)
   analyze.py    candidate selection, compact digest, claude -p, reply parsing
   pipeline.py   run orchestration, progress, settings
+  profile_metrics.py   profile analysis: breakouts, medians, cadence, article chains, phases
+  profile_analysis.py  profile analysis: digest, claude -p prompt, reply parsing
+  profile_store.py     data/profiles/<handle>/ files
   app.py        FastAPI API + static UI
-  static/       index.html, app.js, style.css (no build step)
+  static/       index.html, app.js, profile.js, style.css (no build step)
 ```
 
 The scoring model comes from [x-viral-radar](https://github.com/Sentimenta1ist/x-viral-radar), a Chrome extension that badges posts in your own feed.
