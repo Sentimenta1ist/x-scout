@@ -89,23 +89,37 @@ async def interactive_login(timeout_s=600):
             await ctx.close()
 
 
+MAX_AUTHORS = 15  # keeps the from: query well under X's query length limit
+KIND_ORDER = {"main": 0, "authors": 1, "extra": 2}
+
+
+def authors_query(handles):
+    hs = [h.strip().lstrip("@") for h in handles if h and h.strip()]
+    hs = list(dict.fromkeys(hs))[:MAX_AUTHORS]
+    return "(" + " OR ".join(f"from:{h}" for h in hs) + ")" if hs else ""
+
+
 def build_queries(topic, lang, exact_window=True):
-    """Main query: Top of the last 24h and Latest with some traction. Each extra query (other words for the same
-    subject) adds one Top search over the same 24h. min_faves on Top skips posts the candidate filter would drop anyway:
-    every page read costs rate limit. since_time is exact; since: (a date) is the fallback and reaches back up to ~46h."""
+    """→ [(kind, mode, query)]. Main query: Top of the last 24h and Latest with some traction. Authors: Latest from
+    people who already posted good things on this topic (topic["authors"]: own list + learned from past picks).
+    Each extra query (other words for the same subject) adds one Top search over the same 24h. min_faves on Top skips
+    posts the candidate filter would drop anyway: every page read costs rate limit. since_time is exact; since: (a date)
+    is the fallback and reaches back up to ~46h."""
     q = topic.get("query") or topic["name"]
     lang_op = f" lang:{lang}" if lang else ""
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
     window = f"since_time:{int(day_ago.timestamp())}" if exact_window else f"since:{day_ago:%Y-%m-%d}"
     out = [
         # most engaged posts of the last day: "what everyone is talking about"
-        ("top", f"{q}{lang_op} -filter:replies min_faves:3 {window}"),
+        ("main", "top", f"{q}{lang_op} -filter:replies min_faves:3 {window}"),
         # fresh posts that already got some traction: early risers
-        ("live", f"{q}{lang_op} -filter:replies min_faves:5"),
+        ("main", "live", f"{q}{lang_op} -filter:replies min_faves:5"),
     ]
+    if aq := authors_query(topic.get("authors") or []):
+        out.append(("authors", "live", f"{aq} -filter:replies {window}"))
     for extra in (topic.get("extra") or [])[:3]:
         if extra.strip():
-            out.append(("top", f"{extra.strip()}{lang_op} -filter:replies min_faves:3 {window}"))
+            out.append(("extra", "top", f"{extra.strip()}{lang_op} -filter:replies min_faves:3 {window}"))
     return out
 
 
@@ -114,10 +128,10 @@ def search_count(topics, lang=""):
 
 
 def search_plan(topics, lang, exact_window=True):
-    """Main searches of every topic first, extra queries after: when the rate limit runs out, the run loses
-    extra queries, not whole topics. → [(topic index, query index, mode, query)]"""
-    plan = [(i, j, mode, q) for i, t in enumerate(topics) for j, (mode, q) in enumerate(build_queries(t, lang, exact_window))]
-    return sorted(plan, key=lambda x: (x[1] >= 2, x[0], x[1]))
+    """Main searches of every topic first, then author searches, extra queries last: when the rate limit runs out,
+    the run loses extra queries, not whole topics. → [(topic index, query index, kind, mode, query)]"""
+    plan = [(i, j, kind, mode, q) for i, t in enumerate(topics) for j, (kind, mode, q) in enumerate(build_queries(t, lang, exact_window))]
+    return sorted(plan, key=lambda x: (KIND_ORDER[x[2]], x[0], x[1]))
 
 
 MAX_WAIT_S = 16 * 60  # X's search window is 15 minutes
@@ -222,12 +236,12 @@ async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_st
         ctx = await _context(pw, headless=headless)
         try:
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            for step, (i, j, mode, query) in enumerate(plan):
+            for step, (i, j, kind, mode, query) in enumerate(plan):
                 topic = topics[i]
-                if not exact and mode == "top":
-                    query = build_queries(topic, lang, exact_window=False)[j][1]
+                if not exact and "since_time:" in query:
+                    query = build_queries(topic, lang, exact_window=False)[j][2]
                 tab = "Top" if mode == "top" else "Latest"
-                label = f"{tab}, extra query {j - 1}" if j >= 2 else tab
+                label = {"main": tab, "authors": "known authors"}.get(kind, f"extra query {j - 1}")
                 on_step(step, f"{topic['name']}: {label} ({step + 1}/{len(plan)} searches)")
                 log(f"{topic['name']}: searching {mode} — {query}")
                 try:

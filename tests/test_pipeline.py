@@ -7,6 +7,7 @@ def test_stop_cancels_run_and_marks_it_stopped(monkeypatch):
     finished = []
     monkeypatch.setattr(db, "create_run", lambda topics: 1)
     monkeypatch.setattr(db, "list_runs", lambda n: [])
+    monkeypatch.setattr(db, "good_authors", lambda name: [])
     monkeypatch.setattr(db, "finish_run", lambda run_id, status, result=None, stats=None: finished.append(status))
     monkeypatch.setattr(analyze, "stop_claude", lambda: None)
 

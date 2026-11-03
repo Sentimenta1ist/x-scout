@@ -140,6 +140,15 @@ async def run(settings):
                         _log(f"{t['name']} +> {e}")
             save_settings({**settings, "topics": topics})
 
+        search_topics = []
+        for t in topics:
+            learned = db.good_authors(t["name"])
+            own = [h.lstrip("@") for h in t.get("authors") or []]
+            merged = list(dict.fromkeys(own + learned))
+            if merged:
+                _log(f"{t['name']}: searching {min(len(merged), browser.MAX_AUTHORS)} known authors ({len(own)} yours, {len(learned)} from past picks)")
+            search_topics.append({**t, "authors": merged})
+        topics = search_topics
         searches = browser.search_count(topics, settings["lang"])
         scrape_status = {}
         # scraping ≈ 85% of the bar, analysis the rest

@@ -259,7 +259,8 @@ function topicRow(t = { name: "", query: "" }) {
   row.innerHTML = `<input class="tname" placeholder="AI agents" value="${esc(t.name)}">
     <input class="tquery" placeholder='query, e.g. ("AI agent" OR agentic) -crypto' value="${esc(t.query || "")}">
     <button class="ghost small" title="Remove topic">${icon("x")}</button>
-    <input class="textra" placeholder="extra queries; separated by ;  (empty: Claude writes 3)" value="${esc((t.extra || []).join(" ; "))}">`;
+    <input class="textra" placeholder="extra queries; separated by ;  (empty: Claude writes 3)" value="${esc((t.extra || []).join(" ; "))}">
+    <input class="tauthors" placeholder="good authors: @handle @handle  (authors of past 4-5 picks are added automatically)" value="${esc((t.authors || []).map((h) => "@" + h).join(" "))}">`;
   row.querySelector("button").onclick = () => row.remove();
   return row;
 }
@@ -280,6 +281,8 @@ async function saveSettings() {
     const t = { name: r.querySelector(".tname").value.trim(), query: r.querySelector(".tquery").value.trim() };
     const extra = r.querySelector(".textra").value.split(";").map((x) => x.trim()).filter(Boolean);
     if (extra.length) t.extra = extra;  // left out → Claude writes extra queries on the next run
+    const authors = r.querySelector(".tauthors").value.split(/[\s,]+/).map((x) => x.replace(/^@/, "").trim()).filter(Boolean);
+    if (authors.length) t.authors = authors;
     return t;
   }).filter((t) => t.name);
   if (topics.length > MAX_TOPICS) return ($("saveMsg").textContent = `Max ${MAX_TOPICS} topics.`);

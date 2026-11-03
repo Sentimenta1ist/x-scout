@@ -6,14 +6,22 @@ from x_scout.browser import Budget, build_queries, search_plan
 
 def test_plan_runs_main_searches_of_all_topics_before_extras():
     topics = [{"name": "A", "query": "a", "extra": ["a1", "a2"]}, {"name": "B", "query": "b"}, {"name": "C", "query": "c", "extra": ["c1"]}]
-    plan = [(i, j) for i, j, _, _ in search_plan(topics, "en")]
+    plan = [(i, j) for i, j, _, _, _ in search_plan(topics, "en")]
     assert plan == [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1), (0, 2), (0, 3), (2, 2)]
+
+
+def test_author_search_runs_after_main_and_before_extras():
+    topics = [{"name": "A", "query": "a", "extra": ["a1"], "authors": ["@x", "y", "x"]}, {"name": "B", "query": "b"}]
+    plan = search_plan(topics, "en")
+    assert [k for _, _, k, _, _ in plan] == ["main", "main", "main", "main", "authors", "extra"]
+    q = plan[4][4]
+    assert q.startswith("(from:x OR from:y)") and "since_time:" in q
 
 
 def test_queries_use_an_exact_day_and_skip_dead_posts():
     q = build_queries({"name": "A", "query": "a", "extra": ["b"]}, "en")
-    assert "since_time:" in q[0][1] and "min_faves:3" in q[0][1] and "since_time:" in q[2][1]
-    assert "since:" in build_queries({"name": "A", "query": "a"}, "en", exact_window=False)[0][1]
+    assert "since_time:" in q[0][2] and "min_faves:3" in q[0][2] and "since_time:" in q[2][2]
+    assert "since:" in build_queries({"name": "A", "query": "a"}, "en", exact_window=False)[0][2]
 
 
 def test_budget_waits_for_reset_only_when_almost_spent():

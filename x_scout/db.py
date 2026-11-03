@@ -138,3 +138,21 @@ def mark_stale_runs():
     """A server restart kills in-flight runs; don't leave them 'running' forever."""
     with conn() as c:
         c.execute("update runs set status='error', stats=json_object('error','interrupted') where status='running'")
+
+
+def good_authors(topic, limit=15, runs=40, min_followers=1000):
+    """Authors whose posts Claude picked at q >= 4 under this topic in recent runs, most picked first.
+    Fed back into search as from: queries: on niche topics good posts come from people, not keywords."""
+    counts = {}
+    with conn() as c:
+        rows = c.execute("select result from runs where status='done' and result is not null order by id desc limit ?", (runs,)).fetchall()
+    for (result,) in rows:
+        for t in json.loads(result) or []:
+            if t.get("topic", "").lower() != topic.lower():
+                continue
+            for col in ("reply", "save"):
+                for p in t.get(col) or []:
+                    a = p.get("author") or {}
+                    if (p.get("q") or 0) >= 4 and (a.get("followers") or 0) >= min_followers and a.get("handle"):
+                        counts[a["handle"]] = counts.get(a["handle"], 0) + 1
+    return [h for h, _ in sorted(counts.items(), key=lambda x: -x[1])][:limit]
