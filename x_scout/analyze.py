@@ -15,12 +15,12 @@ from .parse import compact_text
 SYSTEM = """You are a strict curator of X (Twitter) posts for one reader. Input: reader profile, then posts grouped by topic.
 Post line: n|author|followers|age|views|likes|replies|reposts|bookmarks|score|text
 score = local early-virality score 0-100 (velocity vs age and vs author's usual reach). [img]/[vid] = media, QT = quoted post.
-For every topic pick up to 5 R posts and up to 5 S posts, best first. Fill both lists when good posts exist.
-R = worth the reader's reply. Required: younger than 24h, and the profile gives him something concrete to add.
-    Rank higher: younger than 12h, an author with reach or a post taking off, a thread not flooded with replies.
-    Never R for a topic the profile marks as read-only.
-S = worth reading or saving: real substance a smart engineer would bookmark: deep explanation, data, postmortem,
-    a genuinely new tool or result, a strong original take.
+For every topic pick up to 5 R posts and up to 5 S posts, best first. Empty or short lists are normal: pick only what clears the bar, never fill a list.
+R = a reply here is seen by many and the reader has something concrete to add. Required: younger than 24h, real reach (a post taking off or an author with an audience), and the profile gives him a specific number, failure or trade-off for this exact post.
+    An empty thread on a small account is worthless: nobody will read the reply. Few replies is only a plus on a post that already has reach.
+    Never R for a topic the profile marks as read-only, for personal updates, day-N build logs or fundraising news.
+S = worth reading or saving: the post text itself carries real substance a smart engineer would bookmark: deep explanation, data, postmortem, a new result with specifics.
+    You see only the text, not its links: a post that only points to a link, announces a talk, event, guest post or teaser is rejected.
 The post must be about the topic name itself. A post that is mainly about AI/agents/LLMs belongs only to an AI topic,
 never to Crypto, Games, Computer science etc., even if the text mentions the topic.
 Reject: launches that are only marketing, "X is insane"/"you must build these" hype, listicles, course and tool roundups,
@@ -29,7 +29,7 @@ Output plain text only, no markdown, exactly this format, best first:
 # <topic name as given>
 R <n> <q> | <gist> | <why> | <angle>
 S <n> <q> | <gist> | <why>
-q = depth/quality 1-5. gist: what the post says, 1-2 short sentences in {gist_lang}, so the reader can skip the full text; keep key numbers and names.
+q = quality, be strict: 5 rare, would send it to a friend; 4 clearly worth his time; 3 fine but forgettable; 1-2 weak. Most posts are 3 or lower, and only 4-5 are shown. gist: what the post says, 1-2 short sentences in {gist_lang}, so the reader can skip the full text; keep key numbers and names.
 why: <=12 words, concrete, no filler. angle (R only): the actual reply text, ready to send, in the language of the post, <=20 words."""
 
 
@@ -197,6 +197,10 @@ _PICK = re.compile(r"^([RS])\s+#?(\d+)\s+(\d)?\s*\|?\s*(.*)$")
 _COL = {"R": "reply", "S": "save"}
 MAX_PER_COLUMN = 5
 REPLY_MAX_AGE_H = 24
+MIN_Q = 4                 # weaker picks are never shown: an empty column beats a filler post
+REPLY_MIN_FOLLOWERS = 1000
+REPLY_MIN_VIEWS = 1000
+REPLY_MIN_PROJECTED = 2500  # a very young post can qualify by projected views
 
 
 def parse_picks(text):
@@ -220,10 +224,17 @@ def parse_picks(text):
     return {"topics": topics}
 
 
+def has_reply_reach(p):
+    """A reply is worth writing only where people will see it."""
+    if p["author"]["followers"] < REPLY_MIN_FOLLOWERS:
+        return False
+    return (p.get("views") or 0) >= REPLY_MIN_VIEWS or (p["scored"].get("projected") or 0) >= REPLY_MIN_PROJECTED
+
+
 def assemble(claude_data, index, topics):
     """Map Claude's picks (by local index) back to full posts, in Claude's order. A post lands in one column only,
-    picks from another topic are dropped, at most MAX_PER_COLUMN per column. A reply pick older than REPLY_MAX_AGE_H
-    moves to "save": the thread is too old to answer."""
+    picks from another topic or under MIN_Q are dropped, at most MAX_PER_COLUMN per column. A reply pick that is older than
+    REPLY_MAX_AGE_H or has no reach moves to "save": still may be a good read, but not worth a reply."""
     by_name = {t["topic"].strip().lower(): t for t in claude_data.get("topics", [])}
     result = []
     for name, posts in topics.items():
@@ -233,9 +244,10 @@ def assemble(claude_data, index, topics):
         for picked_col in ("reply", "save"):
             for pick in t.get(picked_col, []):
                 p = index.get(pick.get("n"))
-                if not p or id(p) not in allowed or p["id"] in seen:
+                if not p or id(p) not in allowed or p["id"] in seen or (pick.get("q") is not None and pick["q"] < MIN_Q):
                     continue
-                col = "save" if picked_col == "reply" and (p.get("age_min") or 0) > REPLY_MAX_AGE_H * 60 else picked_col
+                too_old = (p.get("age_min") or 0) > REPLY_MAX_AGE_H * 60
+                col = "save" if picked_col == "reply" and (too_old or not has_reply_reach(p)) else picked_col
                 if len(cols[col]) >= MAX_PER_COLUMN:
                     continue
                 seen.add(p["id"])

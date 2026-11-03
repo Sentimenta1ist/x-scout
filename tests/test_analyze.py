@@ -43,7 +43,7 @@ def test_assemble_maps_index_and_rejects_cross_topic():
 
 def test_assemble_keeps_post_in_one_column_and_drops_save_angle():
     a = [_post("1"), _post("2")]
-    reply = "# T\nR 1 4 | g | a | x\nS 1 4 | g | a again\nS 2 3 | g | b | stray angle\n"
+    reply = "# T\nR 1 4 | g | a | x\nS 1 4 | g | a again\nS 2 4 | g | b | stray angle\n"
     res = assemble(parse_picks(reply), {1: a[0], 2: a[1]}, {"T": a})[0]
     assert [p["id"] for p in res["reply"]] == ["1"]
     assert [p["id"] for p in res["save"]] == ["2"]
@@ -52,7 +52,7 @@ def test_assemble_keeps_post_in_one_column_and_drops_save_angle():
 
 def test_assemble_caps_each_column_separately():
     a = [_post(str(i)) for i in range(1, 15)]
-    reply = "# T\n" + "".join(f"R {i} 3 | g | w | x\n" for i in range(1, 8)) + "".join(f"S {i} 3 | g | w\n" for i in range(8, 15))
+    reply = "# T\n" + "".join(f"R {i} 4 | g | w | x\n" for i in range(1, 8)) + "".join(f"S {i} 4 | g | w\n" for i in range(8, 15))
     res = assemble(parse_picks(reply), {i + 1: p for i, p in enumerate(a)}, {"T": a})[0]
     assert len(res["reply"]) == MAX_PER_COLUMN and len(res["save"]) == MAX_PER_COLUMN
 
@@ -62,6 +62,25 @@ def test_assemble_moves_old_reply_pick_to_save():
     res = assemble(parse_picks("# T\nR 1 4 | g | w | x\nR 2 4 | g | w | x\n"), {1: a[0], 2: a[1]}, {"T": a})[0]
     assert [p["id"] for p in res["reply"]] == ["new"]
     assert [p["id"] for p in res["save"]] == ["old"] and res["save"][0]["angle"] == ""
+
+
+def test_assemble_drops_weak_picks_and_moves_reply_without_reach_to_save():
+    big, small_author, no_views = _post("1"), _post("2"), _post("3", views=300)
+    small_author["author"] = {**small_author["author"], "followers": 67}
+    no_views["scored"] = {**no_views["scored"], "projected": 400}
+    weak = _post("4")
+    a = [big, small_author, no_views, weak]
+    res = assemble(parse_picks("# T\nR 1 4 | g | w | x\nR 2 5 | g | w | x\nR 3 4 | g | w | x\nR 4 3 | g | w | x\nS 4 2 | g | w\n"),
+                   {i + 1: p for i, p in enumerate(a)}, {"T": a})[0]
+    assert [p["id"] for p in res["reply"]] == ["1"]
+    assert [p["id"] for p in res["save"]] == ["2", "3"] and all(p["angle"] == "" for p in res["save"])
+
+
+def test_young_post_of_real_author_qualifies_by_projected_views():
+    p = _post("1", views=400)
+    p["scored"] = {**p["scored"], "projected": 3000}
+    res = assemble(parse_picks("# T\nR 1 4 | g | w | x\n"), {1: p}, {"T": [p]})[0]
+    assert [x["id"] for x in res["reply"]] == ["1"]
 
 
 def test_is_junk():

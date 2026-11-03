@@ -202,7 +202,6 @@ async function refresh() {
     $("log").textContent = (s.log || []).join("\n");
     $("log").scrollTop = 1e9;
     if (wasRunning && !s.running && s.kind === "run") await loadRuns(s.run_id);
-    else if (s.running && s.kind === "run" && s.run_id && $("runSelect").value != s.run_id) await loadRuns(s.run_id);
     wasRunning = s.running;
     if (window.profilePanel) await window.profilePanel.onState(s);
     if (window.postPanel) await window.postPanel.onState(s);
