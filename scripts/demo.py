@@ -196,7 +196,10 @@ def seed_post():
                                    "useful": ["Add retries and alerting before migrating: both are built into Zapier and missing by default in n8n.", "Compare the bill with the hours of upkeep, not the bill alone."], "empty": ["The $14 leaves out his time for maintenance.", "The savings are not verified: no invoice is shown."],
                                    "viral": [{"what": "Before and after in the first line", "how": "$389 → $14 needs no explanation."}, {"what": "Saveable format", "how": "1.2 bookmarks per like: people keep it for later."}],
                                    "take": [{"what": "What broke as the promise", "how": "Announce the failures in the first line of your own migration story."}, {"what": "One number per claim", "how": "Use your own 54 s in queue vs 7 s of work."}],
-                                   "repeat": "adapt", "repeat_why": "The structure fits, but use a process you really automated.", "draft": ["we automated a weekly report for a client: 6 hours down to 20 minutes.", "here is what it cost and the 3 things that broke:"], "copies_dropped": 0}})
+                                   "repeat": "adapt", "repeat_why": "The structure fits, but use a process you really automated.",
+                                   "replies": [{"kind": "say", "text": "the bill is the easy part. who gets paged when a run fails at 3am?"}, {"kind": "say", "text": "retries were the first thing that bit me too"},
+                                               {"kind": "ask", "text": "what broke first, and how did you notice?"}, {"kind": "ask", "text": "how many hours a month does the upkeep take now?"}],
+                                   "base": ["moved [N] [old tool things] to [new tool]. monthly bill: [before] → [after].", "full cost breakdown and the [N] things that broke:"], "draft": ["we automated a weekly report for a client: 6 hours down to 20 minutes.", "here is what it cost and the 3 things that broke:"], "copies_dropped": 0}})
 
 
 def main():

@@ -8,6 +8,16 @@
   const NUMS = (m) => [m.vs_median != null ? `${m.vs_median}× author's typical views` : null, m.views_per_follower != null ? `${m.views_per_follower} views per follower` : null,
     m.bookmark_ratio != null ? `${m.bookmark_ratio} bookmarks per like` : null, m.views_per_h != null ? `${k(m.views_per_h)} views per hour` : null].filter(Boolean);
 
+  const copyBtn = (text, title) => `<button class="link po-copy" data-copy="${esc(text)}" title="${title}" aria-label="${title}">${icon("copy")}</button>`;
+  const REPLY_KIND = { say: "Say", ask: "Ask" };
+  function replies(r, m) {
+    const xs = r.replies || [];
+    if (!xs.length) return "";
+    const late = m.age_h > 24 ? `<p class="hint">The post is ${Math.round(m.age_h / 24)}d old, a reply here will get few views.</p>` : "";
+    return late + `<ul class="po-replies">${xs.map((x) => `<li><span class="po-kind">${REPLY_KIND[x.kind]}</span><span class="po-reply">${esc(x.text)}</span>${copyBtn(x.text, "Copy reply")}</li>`).join("")}</ul>`;
+  }
+  const block = (label, lines, title) => lines && lines.length ? `<h4 class="po-sub">${label}</h4><pre class="po-draft">${esc(lines.join("\n"))}${copyBtn(lines.join("\n"), title)}</pre>` : "";
+
   function render() {
     const body = $("poBody");
     $("poRe").disabled = !data;
@@ -22,9 +32,10 @@
       <div class="po-verdict"><div class="po-score">${r.score ?? "?"}<small>/5</small></div><div><p>${esc(r.verdict)}</p><p class="po-gist">${esc(r.gist)}</p></div></div>
       ${section("Actually useful", r.useful.length ? list(r.useful) : `<p class="hint">Nothing concrete to apply.</p>`)}
       ${section("Fluff and unverified", list(r.empty))}
+      ${section("Reply options", replies(r, m))}
       ${section("Why it spread", pairs(r.viral) + (nums.length ? `<p class="hint">${nums.join(" · ")}</p>` : ""))}
       ${section("Take for your posts", pairs(r.take))}
-      ${section("Repeat it?", `<p class="pf-line">${r.repeat ? `<span class="po-repeat">${REPEAT[r.repeat]}</span>` : ""}${esc(r.repeat_why)}</p>${r.draft.length ? `<pre class="po-draft">${esc(r.draft.join("\n"))}<button id="poCopy" class="link" title="Copy draft" aria-label="Copy draft">${icon("copy")}</button></pre>` : ""}`)}
+      ${section("Repeat it?", `<p class="pf-line">${r.repeat ? `<span class="po-repeat">${REPEAT[r.repeat]}</span>` : ""}${esc(r.repeat_why)}</p>${block("Base version, fill it in", r.base, "Copy base version")}${block("Your version", r.draft, "Copy your version")}`)}
     ` : `<div class="none">No Claude analysis in this record${(data.stats || {}).claude_error ? ": Claude failed" : ""}. Re-analyze uses the stored post.</div>`)
       + `<details class="pf-fold"><summary>The post</summary><div id="poOriginal"></div></details>${cost}`;
     const box = $("poOriginal");
@@ -34,8 +45,7 @@
       el.querySelector(".body").classList.add("open");
       box.appendChild(el);
     } else box.innerHTML = `<p class="po-text">${esc(p.text)}</p>`;
-    const copy = $("poCopy");
-    if (copy) copy.onclick = () => navigator.clipboard.writeText(r.draft.join("\n")).then(() => { copy.classList.add("copied"); setTimeout(() => copy.classList.remove("copied"), 1200); });
+    body.querySelectorAll(".po-copy").forEach((b) => (b.onclick = () => navigator.clipboard.writeText(b.dataset.copy).then(() => { b.classList.add("copied"); setTimeout(() => b.classList.remove("copied"), 1200); })));
   }
 
   async function loadHistory(key) {

@@ -67,7 +67,7 @@ Open **Profiles** in the left sidebar, type an X handle, press **Analyze**. You 
 
 ## Post analysis
 
-Open **Post**, paste a link to a post or article, or its text. One screen tells you whether it is really useful or just went viral: a 1–5 usefulness score, what you can apply, what is fluff or unverified, why it spread, what to take for your own posts, and whether to repeat it, with a draft built only from your About me.
+Open **Post**, paste a link to a post or article, or its text. One screen tells you whether it is really useful or just went viral: a 1–5 usefulness score, what you can apply, what is fluff or unverified, why it spread, what to take for your own posts, plain reply options (statements and open questions), and whether to repeat it, with a fill-in base version and a draft built only from your About me.
 
 <img src="docs/img/post.png" alt="Post analysis: usefulness score, useful points, fluff, why it spread and a draft" width="100%">
 
