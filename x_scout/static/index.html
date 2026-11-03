@@ -7,34 +7,23 @@
   <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
-  <header class="top">
+  <aside class="side">
     <div class="brand">X Scout</div>
-    <div class="status">
+    <nav class="side-nav" aria-label="Sections">
+      <button id="navFeed" data-view="feed">Topics</button>
+      <button id="navProfiles" data-view="profiles">Profiles</button>
+    </nav>
+    <div class="side-foot">
+      <button id="settingsBtn">Settings</button>
       <span id="loginPill" class="pill">X: …</span>
-      <button id="loginBtn" class="ghost">Log in to X</button>
-      <button id="checkBtn" class="ghost" title="Open the profile headless and look for a session">Check</button>
+      <div class="side-login">
+        <button id="loginBtn" class="ghost small">Log in to X</button>
+        <button id="checkBtn" class="ghost small" title="Open the profile headless and look for a session">Check</button>
+      </div>
     </div>
-    <div class="actions">
-      <select id="runSelect" title="Past runs"></select>
-      <button id="reBtn" class="ghost" title="Run Claude again on this run's posts, no scraping">Re-analyze</button>
-      <button id="logBtn" class="ghost">Log</button>
-      <button id="settingsBtn" class="ghost">Settings</button>
-      <button id="pfToggle" class="ghost" title="Analyze an X account">Profiles</button>
-      <button id="runBtn" class="primary">Run</button>
-      <button id="stopBtn" class="ghost hidden" title="Stop this run. Posts scraped so far are not kept">Stop</button>
-    </div>
-  </header>
+  </aside>
 
-  <section id="progress" class="progress hidden">
-    <div class="progress-head">
-      <span class="spinner"></span><b id="step"></b>
-      <span id="timing" class="hint"></span>
-      <button id="logToggle" class="link">log</button>
-    </div>
-    <div class="bar"><div id="barFill" class="bar-fill"></div></div>
-    <pre id="log" class="log hidden"></pre>
-  </section>
-
+  <div class="content">
   <section id="settings" class="settings hidden">
     <div class="settings-grid">
       <div>
@@ -65,6 +54,27 @@
     </div>
   </section>
 
+  <div id="viewFeed">
+  <header class="top">
+    <div class="actions">
+      <select id="runSelect" title="Past runs"></select>
+      <button id="reBtn" class="ghost" title="Run Claude again on this run's posts, no scraping">Re-analyze</button>
+      <button id="logBtn" class="ghost">Log</button>
+      <button id="runBtn" class="primary">Run</button>
+      <button id="stopBtn" class="ghost hidden" title="Stop this run. Posts scraped so far are not kept">Stop</button>
+    </div>
+  </header>
+
+  <section id="progress" class="progress hidden">
+    <div class="progress-head">
+      <span class="spinner"></span><b id="step"></b>
+      <span id="timing" class="hint"></span>
+      <button id="logToggle" class="link">log</button>
+    </div>
+    <div class="bar"><div id="barFill" class="bar-fill"></div></div>
+    <pre id="log" class="log hidden"></pre>
+  </section>
+
   <main class="wrap">
     <div id="meta" class="summary"></div>
     <nav id="tabs" class="tabs"></nav>
@@ -76,11 +86,9 @@
          3. Press <b>Run</b>. Takes a few minutes: search is paced like a person.</p>
     </div>
   </main>
-  <aside id="pfPanel" class="pf hidden" aria-label="Profile analysis">
-    <header class="pf-head">
-      <h2>Profile analysis</h2>
-      <button id="pfClose" class="link" title="Collapse panel" aria-label="Collapse panel"></button>
-    </header>
+  </div>
+  <section id="viewProfiles" class="pf hidden" aria-label="Profile analysis">
+    <h2 class="pf-title">Profile analysis</h2>
     <form id="pfForm" class="pf-form">
       <input id="pfHandle" placeholder="X handle, e.g. some_builder" autocomplete="off" spellcheck="false" aria-label="X handle">
       <button id="pfGo" class="primary" type="submit">Analyze</button>
@@ -98,7 +106,8 @@
     <div id="pfMeta" class="summary"></div>
     <nav id="pfTabs" class="tabs"></nav>
     <div id="pfBody" class="pf-body"></div>
-  </aside>
+  </section>
+  </div>
   <script src="/static/app.js?v=2"></script>
   <script src="/static/profile.js?v=2"></script>
 </body>

@@ -42,7 +42,7 @@ Every card has Claude's one-line take, a 1–2 sentence summary of the post (in 
 
 ## Profile analysis
 
-Open **Profiles**, type an X handle, press **Analyze**. You get a breakdown of that account: which posts went viral and why, how its reach grew, and what you can repeat on your own account. Read-only, same pace and stop rules as search.
+Open **Profiles** in the left sidebar, type an X handle, press **Analyze**. You get a breakdown of that account: which posts went viral and why, how its reach grew, and what you can repeat on your own account. Read-only, same pace and stop rules as search.
 
 <table>
 <tr>

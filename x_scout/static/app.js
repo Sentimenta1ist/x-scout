@@ -47,6 +47,8 @@ const ICON = {
   reply: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/>',
   bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><path d="M12 7v6"/><path d="M15 10H9"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  "columns-2": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',
+  "sliders-horizontal": '<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>',
   "user-search": '<circle cx="10" cy="7" r="4"/><path d="M10.3 15H7a4 4 0 0 0-4 4v2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-1.9-1.9"/>',
   copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
@@ -246,6 +248,24 @@ async function saveSettings() {
   $("saveMsg").textContent = "Saved.";
   setTimeout(() => $("settings").classList.add("hidden"), 600);
 }
+
+// ---- sidebar: one section at a time ----
+const VIEWS = { feed: ["viewFeed", "navFeed", "columns-2", "Topics"], profiles: ["viewProfiles", "navProfiles", "user-search", "Profiles"] };
+function setView(view) {
+  if (!VIEWS[view]) view = "feed";
+  for (const [key, [pane, nav]] of Object.entries(VIEWS)) {
+    $(pane).classList.toggle("hidden", key !== view);
+    $(nav).classList.toggle("active", key === view);
+    if (key === view) $(nav).setAttribute("aria-current", "page"); else $(nav).removeAttribute("aria-current");
+  }
+  try { localStorage.setItem("view", view); } catch {}
+}
+for (const [view, [, nav, ic, label]] of Object.entries(VIEWS)) {
+  $(nav).innerHTML = `${icon(ic)}<span>${label}</span><i class="nav-busy hidden"></i>`;
+  $(nav).onclick = () => setView(view);
+}
+$("settingsBtn").innerHTML = `${icon("sliders-horizontal")}<span>Settings</span>`;
+try { setView(localStorage.getItem("view") || "feed"); } catch { setView("feed"); }
 
 const act = (fn) => async () => { try { await fn(); } catch (e) { alert(e.message); } refresh(); };
 $("runBtn").onclick = act(() => post("/api/run"));

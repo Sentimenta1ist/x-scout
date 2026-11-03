@@ -1,4 +1,4 @@
-// Profile analysis side panel. Uses helpers from app.js: $, api, post, k, esc, icon, card, richText, act.
+// Profile analysis section. Uses helpers from app.js: $, api, post, k, esc, icon, card, richText, act.
 (() => {
   const TABS = [["overview", "Overview"], ["growth", "Growth"], ["viral", "Viral posts"], ["patterns", "Patterns"], ["repeat", "Repeat for me"], ["raw", "Raw"]];
   const COLUMNS = [["created_at", "Date"], ["type", "Type"], ["media_type", "Media"], ["views", "Views"], ["likes", "Likes"], ["replies", "Replies"],
@@ -277,12 +277,6 @@
     render();
   }
 
-  function setOpen(on) {
-    $("pfPanel").classList.toggle("hidden", !on);
-    document.body.classList.toggle("pf-open", on);
-    try { localStorage.setItem("pf-open", on ? "1" : ""); } catch {}
-  }
-
   window.profilePanel = {
     async onState(s) {
       const job = s.running && s.kind === "profile";
@@ -303,13 +297,12 @@
         if (s.error && !STATUS[s.error]) alert(s.error);
       }
       wasJob = job;
+      // a job in the other section keeps Run and Analyze disabled: show why in the sidebar
+      $("navProfiles").querySelector(".nav-busy").classList.toggle("hidden", !job);
+      $("navFeed").querySelector(".nav-busy").classList.toggle("hidden", !(s.running && s.kind !== "profile"));
     },
   };
 
-  $("pfToggle").innerHTML = `${icon("user-search")} Profiles`;
-  $("pfClose").innerHTML = icon("x");
-  $("pfToggle").onclick = () => setOpen($("pfPanel").classList.contains("hidden"));
-  $("pfClose").onclick = () => setOpen(false);
   $("pfForm").onsubmit = (e) => {
     e.preventDefault();
     const handle = $("pfHandle").value.trim();
@@ -318,6 +311,5 @@
   $("pfStop").onclick = act(() => post("/api/stop"));
   $("pfRe").onclick = () => { if (data) act(() => post(`/api/profiles/${data.profile.handle}/analyses/${data.id}/reanalyze`))(); };
   $("pfHistory").onchange = (e) => { if (e.target.value) open(e.target.value); };
-  try { if (localStorage.getItem("pf-open")) setOpen(true); } catch {}
   loadHistory();
 })();

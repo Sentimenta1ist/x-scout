@@ -44,8 +44,7 @@ async def main(base, only=None):
 
     def open_tab(label):
         async def go(page):
-            if not await page.is_visible("#pfPanel"):
-                await page.click("#pfToggle")
+            await page.click("#navProfiles")
             await page.wait_for_timeout(300)
             await page.click(f"#pfTabs button:has-text('{label}')")
         return go
