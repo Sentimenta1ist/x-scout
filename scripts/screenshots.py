@@ -59,6 +59,11 @@ async def main(base, only=None):
             await shot(b, base, "mobile", "dark", IDLE, width=390, height=844)
         await shot(b, base, "profile-growth", "dark", IDLE, before=open_tab("Growth"))
         await shot(b, base, "profile-repeat", "dark", IDLE, before=open_tab("Repeat for me"))
+
+        async def open_post(page):
+            await page.click("#navPost")
+
+        await shot(b, base, "post", "dark", IDLE, before=open_post)
         await b.close()
     print("written to", OUT)
 

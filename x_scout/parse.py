@@ -299,3 +299,46 @@ def finalize_timeline(posts, accounts):
         if p.get("reply_to_handle"):
             p["reply_to_followers"] = accounts.get(p["reply_to_handle"].lower())
     return sorted(by_id.values(), key=lambda p: p["created_at"] or "")
+
+
+# ---- one post: the conversation page, whichever operation X serves it through ----
+
+def _walk_tweets(obj):
+    if isinstance(obj, dict):
+        if obj.get("rest_id") and "full_text" in (obj.get("legacy") or {}):
+            yield obj
+        for v in obj.values():
+            yield from _walk_tweets(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_tweets(v)
+
+
+def article_text(t):
+    """Full body of an X Article, when the response carries it."""
+    a = _get(t, "article", "article_results", "result") or {}
+    blocks = _get(a, "content_state", "blocks", default=[])
+    body = "\n".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("text"))
+    return body or a.get("plain_text") or ""
+
+
+def post_detail(payloads, post_id):
+    """Conversation JSON payloads → the post with its author's own thread parts, or None if the post isn't in them."""
+    found = {}
+    for payload in payloads:
+        for t in _walk_tweets(payload):
+            found.setdefault(t["rest_id"], t)
+    raw = found.get(post_id)
+    p = profile_post(raw) if raw else None
+    if not p:
+        return None
+    if body := article_text(raw):
+        p["text"] = f"{p['article_title'] or ''}\n\n{body}".strip()
+    handle = p["author"]["handle"]
+    parts = [profile_post(t) for t in found.values() if t["rest_id"] != post_id]
+    thread = [x for x in parts if x and x["author"]["handle"] == handle and x["self_reply"] and x["conversation_id"] == (p["conversation_id"] or post_id)]
+    p["thread_parts"] = [{"id": x["id"], "text": x["text"], "views": x["views"], "created_at": x["created_at"]}
+                         for x in sorted(thread, key=lambda x: x["created_at"] or "")]
+    if p["thread_parts"] and p["type"] in ("post", "quote"):
+        p["type"] = "thread"
+    return p

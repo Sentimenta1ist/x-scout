@@ -53,12 +53,11 @@ Open **Profiles** in the left sidebar, type an X handle, press **Analyze**. You 
 
 | Tab | What is there |
 |---|---|
-| **Overview** | Bio, key numbers, Claude's summary, format mix, posting hours, article chains, borrowed reach |
-| **Growth** | Views per post on a log scale, 7- and 30-post medians, breakouts, phases with confidence, snapshot comparison |
-| **Viral posts** | Top 10 with link, numbers and why each worked |
-| **Patterns** | Hooks, opening lines as templates, structures, CTAs, what flops |
+| **Overview** | Four numbers, Claude's short take, the first three things to try |
 | **Repeat for me** | 5–8 tactics adapted to your About me, each with a one-week test; plus what not to copy |
-| **Raw** | Sortable table of every post, CSV export |
+| **Viral posts** | Top posts with numbers and why each worked |
+| **Growth** | Views per post on a log scale, 7- and 30-post medians, viral posts, phases with confidence |
+| **Details** | Folded: hooks and structures, format mix, posting hours, article chains, borrowed reach, every post with CSV export |
 
 - **Scrape:** up to 300 posts or 120 days, whichever comes first, plus up to 60 replies. All three limits are in Settings. Takes a few minutes.
 - **Metrics are local.** A breakout is a post with at least 5× the median views of the previous 30 original posts.
@@ -66,12 +65,22 @@ Open **Profiles** in the left sidebar, type an X handle, press **Analyze**. You 
 - **One `claude -p` call** (Sonnet by default) on the metrics, the top ~40 posts by breakout ratio and ~20 typical ones. It suggests structures and tactics, never copied text; items that repeat 8+ words of a post are dropped.
 - **Stop, a 429 or a lost session keep what was read**, without calling Claude. **Re-analyze** runs Claude on stored posts with no X traffic.
 
+## Post analysis
+
+Open **Post**, paste a link to a post or article, or its text. One screen tells you whether it is really useful or just went viral: a 1–5 usefulness score, what you can apply, what is fluff or unverified, why it spread, what to take for your own posts, and whether to repeat it, with a draft built only from your About me.
+
+<img src="docs/img/post.png" alt="Post analysis: usefulness score, useful points, fluff, why it spread and a draft" width="100%">
+
+- A link opens the post once in the same Chrome session and reads the full text, including X Articles and the author's own thread. Pasted text does not touch X; it is judged without numbers.
+- If you analyzed the author in **Profiles**, views are compared with their typical post.
+- One `claude -p` call, about $0.04. **Re-analyze** uses the stored post. Records live in `data/posts/`.
+
 ## Screens
 
 <table>
 <tr>
 <td width="50%"><img src="docs/img/running.png" alt="Run in progress with progress bar, ETA and log"></td>
-<td width="50%"><img src="docs/img/settings.png" alt="Settings: topics, queries, scraping limits, model and About me profile"></td>
+<td width="50%"><img src="docs/img/settings.png" alt="Settings section: topics, queries, scraping limits, model and About me profile"></td>
 </tr>
 <tr>
 <td align="center"><sub>A run in progress</sub></td>
@@ -172,6 +181,7 @@ Everything is local and gitignored, in `data/`:
 | `x-scout.db` | Posts, metric snapshots (for acceleration and author baselines), runs |
 | `browser-profile/` | The Chrome profile with your X session |
 | `settings.json`, `profile.md` | Your topics and About me |
+| `posts/` | Analyzed posts: parsed post, report, raw X JSON |
 | `profiles/<handle>/` | Scrapes (parsed posts + raw X JSON, gzipped), analyses, `snapshots.jsonl` |
 
 The only network traffic is Chrome talking to x.com and the Claude CLI talking to Anthropic.
@@ -193,8 +203,9 @@ x_scout/
   profile_metrics.py   profile analysis: breakouts, medians, cadence, article chains, phases
   profile_analysis.py  profile analysis: digest, claude -p prompt, reply parsing
   profile_store.py     data/profiles/<handle>/ files
+  post_analysis.py     post analysis: link or text, ratios, claude -p prompt, reply parsing, data/posts/
   app.py        FastAPI API + static UI
-  static/       index.html, app.js, profile.js, style.css (no build step)
+  static/       index.html, app.js, profile.js, post.js, style.css (no build step)
 ```
 
 The scoring model comes from [x-viral-radar](https://github.com/Sentimenta1ist/x-viral-radar), a Chrome extension that badges posts in your own feed.

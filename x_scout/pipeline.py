@@ -4,7 +4,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import analyze, browser, db, profile_analysis, profile_metrics, profile_store
+from . import analyze, browser, db, post_analysis, profile_analysis, profile_metrics, profile_store
 from .config import PROFILE_MD, ROOT, SETTINGS_JSON
 from .parse import age_minutes, finalize_timeline
 from .scoring import project_views, score
@@ -26,9 +26,9 @@ DEFAULT_SETTINGS = {
 MAX_TOPICS = 5
 
 # live state of the current run, polled by the UI
-# kind: "run" (topic search) or "profile" (profile analysis); one job at a time, they share Chrome and Stop
+# kind: "run" (topic search), "profile" or "post"; one job at a time, they share Chrome and Stop
 state = {"running": False, "kind": "run", "run_id": None, "step": "", "log": [], "progress": 0.0, "eta_s": None, "started": None,
-         "handle": None, "analysis_id": None, "error": None}
+         "handle": None, "analysis_id": None, "post_key": None, "error": None}
 _task = None  # asyncio task of the current run, for Stop
 
 
@@ -342,3 +342,95 @@ async def reanalyze_profile(handle, analysis_id, settings):
     except Exception as e:
         _log(f"error: {e!r}")
         _finish_profile(handle, error=str(e)[:500])
+
+
+# ---- one pasted post ----
+
+def _post_report(record, settings):
+    prompt = post_analysis.digest(load_profile(), record["post"], record["metrics"])
+    _log(f"claude -p ({settings['profile_model']}): ~{len(prompt) // 4} tokens of input")
+    text, usage = analyze.run_claude(prompt, model=settings["profile_model"], system=post_analysis.system_prompt(settings["gist_lang"]), raw=True)
+    _log(f"claude done: in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
+    return post_analysis.parse_report(text, record["post"].get("text")), usage
+
+
+async def _post_claude_step(record, settings, t0):
+    """The post is saved first, so a failed or stopped Claude call can be retried without opening X again."""
+    post_analysis.save(record)
+    state.update(progress=0.5, step="Claude is reading the post")
+    try:
+        record["report"], record["stats"]["claude"] = await asyncio.to_thread(_post_report, record, settings)
+        record["stats"].pop("claude_error", None)
+    except Exception as e:
+        _log(f"claude failed, the post is kept, use Re-analyze: {e}")
+        record["stats"]["claude_error"] = str(e)[:500]
+    record["stats"]["total_s"] = round(time.time() - t0)
+    post_analysis.save(record)
+
+
+def _author_median(post):
+    handle = (post.get("author") or {}).get("handle")
+    if not handle:
+        return None
+    try:
+        snaps = profile_store.snapshots(handle)
+    except ValueError:
+        return None
+    return snaps[-1].get("median_views_30") if snaps else None
+
+
+async def analyze_post(ref, settings):
+    """ref from post_analysis.parse_ref. A link opens X once; pasted text doesn't touch X."""
+    global _task
+    _task = asyncio.current_task()
+    state.update(running=True, kind="post", post_key=None, analysis_id=None, error=None, run_id=None, log=[], progress=0.1,
+                 step="opening the post" if ref.get("id") else "Claude is reading the post", eta_s=75 if ref.get("id") else 50, started=time.time())
+    t0 = time.time()
+    sink = {"post": None, "responses": []}
+    try:
+        if ref.get("id"):
+            await browser.scrape_post(ref["id"], sink, headless=settings["headless"], log=_log)
+            post = sink["post"]
+        else:
+            post = {"id": None, "text": ref["text"], "views": None}
+        record = {"key": ref["key"], "created_at": db.now_iso(), "post": post, "metrics": post_analysis.metrics(post, _author_median(post)),
+                  "report": None, "stats": {}}
+        post_analysis.save(record, sink["responses"])
+        await _post_claude_step(record, settings, t0)
+        _log(f"done in {record['stats']['total_s']}s")
+        state.update(post_key=ref["key"])
+    except asyncio.CancelledError:
+        _log("stopped")
+        state.update(error="stopped")
+    except browser.NeedLogin:
+        _log("X asks to log in")
+        state.update(error="X asks to log in: press 'Log in to X' and retry")
+    except browser.RateLimited:
+        _log("X rate limit (429): stopped")
+        state.update(error="X rate limit (429). Wait an hour before the next run.")
+    except Exception as e:
+        _log(f"error: {e}")
+        state.update(error=str(e)[:500])
+    finally:
+        state.update(running=False, step="", progress=1.0)
+
+
+async def reanalyze_post(key, settings):
+    """Claude again on the stored post. No X traffic."""
+    global _task
+    _task = asyncio.current_task()
+    state.update(running=True, kind="post", post_key=None, analysis_id=None, error=None, run_id=None, log=[], progress=0.5,
+                 step="Claude is reading the post", eta_s=50, started=time.time())
+    t0 = time.time()
+    try:
+        record = post_analysis.load(key)
+        await _post_claude_step(record, settings, t0)
+        state.update(post_key=key)
+    except asyncio.CancelledError:
+        _log("stopped")
+        state.update(error="stopped")
+    except Exception as e:
+        _log(f"error: {e}")
+        state.update(error=str(e)[:500])
+    finally:
+        state.update(running=False, step="", progress=1.0)

@@ -14,6 +14,7 @@ DB_PATH = DATA / "x-scout.db"
 BROWSER_PROFILE = DATA / "browser-profile"
 PROFILE_MD = DATA / "profile.md"
 SETTINGS_JSON = DATA / "settings.json"
+POSTS = DATA / "posts"  # pasted posts and their analyses
 PROFILES = DATA / "profiles"  # one dir per analyzed X account: scrapes, analyses, snapshots
 # claude -p runs from an empty dir so no CLAUDE.md / project settings get pulled into the prompt.
 CLAUDE_CWD = DATA / "claude-cwd"

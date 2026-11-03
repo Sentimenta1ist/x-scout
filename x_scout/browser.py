@@ -13,7 +13,7 @@ from urllib.parse import quote
 from playwright.async_api import async_playwright
 
 from .config import BROWSER_PROFILE
-from .parse import posts_from_search, profile_from_user, timeline_page
+from .parse import post_detail, posts_from_search, profile_from_user, timeline_page
 
 _lock = asyncio.Lock()  # one Chrome per profile dir at a time
 
@@ -275,4 +275,50 @@ async def scrape_profile(handle, sink, max_posts=300, max_days=120, max_replies=
                                      cutoff, sink, log, lambda: on_progress("replies", len(sink["posts"]) - own))
         finally:
             await ctx.close()
+    return sink
+
+
+async def scrape_post(post_id, sink, headless=True, log=print):
+    """Open one post's page and read it from whatever GraphQL responses carry it. Read-only: a small scroll loads the author's thread.
+    Fills sink["post"] and sink["responses"]. Raises NeedLogin / RateLimited / LookupError."""
+    payloads, flags = [], {"limited": False}
+
+    async def on_response(resp):
+        m = _GRAPHQL_OP.search(resp.url)
+        if not m:
+            return
+        if resp.status == 429:
+            flags["limited"] = True
+        if resp.status != 200 or "Tweet" not in m.group(1):
+            return
+        try:
+            payloads.append(await resp.json())
+        except Exception:
+            pass
+
+    async with _lock, async_playwright() as pw:
+        ctx = await _context(pw, headless=headless)
+        try:
+            if not any(c["name"] == "auth_token" for c in await ctx.cookies("https://x.com")):
+                raise NeedLogin()
+            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            page.on("response", on_response)
+            log(f"reading post {post_id}")
+            await page.goto(f"https://x.com/i/status/{post_id}", wait_until="domcontentloaded")
+            for _ in range(5):
+                await asyncio.sleep(random.uniform(3, 5))
+                if flags["limited"]:
+                    raise RateLimited()
+                if "/login" in page.url or "/i/flow" in page.url:
+                    raise NeedLogin()
+                if post_detail(payloads, post_id):
+                    break
+            await page.mouse.wheel(0, random.randint(800, 1500))
+            await asyncio.sleep(random.uniform(3, 5))
+        finally:
+            await ctx.close()
+    sink["responses"] = payloads
+    sink["post"] = post_detail(payloads, post_id)
+    if not sink["post"]:
+        raise LookupError(f"Post {post_id}: not found, deleted, or a retweet. X returned no data for it.")
     return sink

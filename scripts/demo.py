@@ -9,7 +9,7 @@ import json
 import random
 from datetime import datetime, timedelta, timezone
 
-from x_scout import db, profile_metrics, profile_store
+from x_scout import db, post_analysis, profile_metrics, profile_store
 from x_scout.config import PROFILE_MD, ROOT, SETTINGS_JSON
 
 NOW = datetime.now(timezone.utc)
@@ -186,6 +186,19 @@ def seed_profile():
                                          "stats": {"posts": len(rows), "scrape_s": 214, "total_s": 262, "claude": {"input_tokens": 14200, "output_tokens": 3100, "cost_usd_equiv": 0.09, "duration_s": 47}}})
 
 
+def seed_post():
+    post = {"id": "demo1", "url": "https://x.com/kaibrennan/status/demo1", "type": "post", "media_type": "photo", "created_at": (NOW - timedelta(hours=30)).isoformat(),
+            "text": "Moved 40 Zaps to self-hosted n8n. Monthly bill: $389 → $14. Full cost breakdown and the 3 things that broke:", "media": ["photo"], "quoted": None,
+            "author": {"handle": "kaibrennan", "name": "Kai Brennan", "followers": 9100, "verified": False},
+            "views": 86000, "likes": 1260, "replies": 148, "reposts": 170, "quotes": 22, "bookmarks": 1540}
+    post_analysis.save({"key": "1000000000000000001", "created_at": NOW.isoformat(), "post": post, "metrics": post_analysis.metrics(post, 7200), "stats": {"total_s": 24, "claude": {"input_tokens": 4200, "output_tokens": 900, "cost_usd_equiv": 0.03, "duration_s": 15}},
+                        "report": {"score": 4, "verdict": "Worth reading: real numbers and what failed, unusual for a migration post.", "gist": "A move from Zapier to self-hosted n8n cut the bill 28 times; retries, alerting and OAuth renewals broke.",
+                                   "useful": ["Add retries and alerting before migrating: both are built into Zapier and missing by default in n8n.", "Compare the bill with the hours of upkeep, not the bill alone."], "empty": ["The $14 leaves out his time for maintenance.", "The savings are not verified: no invoice is shown."],
+                                   "viral": [{"what": "Before and after in the first line", "how": "$389 → $14 needs no explanation."}, {"what": "Saveable format", "how": "1.2 bookmarks per like: people keep it for later."}],
+                                   "take": [{"what": "What broke as the promise", "how": "Announce the failures in the first line of your own migration story."}, {"what": "One number per claim", "how": "Use your own 54 s in queue vs 7 s of work."}],
+                                   "repeat": "adapt", "repeat_why": "The structure fits, but use a process you really automated.", "draft": ["we automated a weekly report for a client: 6 hours down to 20 minutes.", "here is what it cost and the 3 things that broke:"], "copies_dropped": 0}})
+
+
 def main():
     db.init()
     topics = [{"name": t, "query": ""} for t in DEMO]
@@ -206,6 +219,7 @@ def main():
     SETTINGS_JSON.write_text(json.dumps({"topics": topics}, indent=2))
     PROFILE_MD.write_text((ROOT / "profile.example.md").read_text())
     seed_profile()
+    seed_post()
     print(f"demo run #{run_id} and profile @{PROFILE_DEMO['handle']} written")
 
 

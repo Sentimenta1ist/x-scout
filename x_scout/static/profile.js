@@ -1,19 +1,20 @@
 // Profile analysis section. Uses helpers from app.js: $, api, post, k, esc, icon, card, richText, act.
 (() => {
-  const TABS = [["overview", "Overview"], ["growth", "Growth"], ["viral", "Viral posts"], ["patterns", "Patterns"], ["repeat", "Repeat for me"], ["raw", "Raw"]];
+  const TABS = [["overview", "Overview"], ["repeat", "Repeat for me"], ["viral", "Viral posts"], ["growth", "Growth"], ["details", "Details"]];
   const COLUMNS = [["created_at", "Date"], ["type", "Type"], ["media_type", "Media"], ["views", "Views"], ["likes", "Likes"], ["replies", "Replies"],
     ["reposts", "Reposts"], ["quotes", "Quotes"], ["bookmarks", "Saves"], ["er", "ER"], ["ratio", "× median"], ["text", "Text"]];
   const STATUS = { stopped: "Stopped: partial data", rate_limited: "X rate limit: partial data", need_login: "Logged out: partial data" };
-  let data = null, tab = "overview", wasJob = false, sort = { key: "created_at", dir: -1 };
+  let data = null, tab = "overview", wasJob = false, sort = { key: "created_at", dir: -1 }, showAllViral = false;
+  const opened = new Set();  // Details sections stay open across re-renders
 
   const num = (x) => x == null ? "?" : Math.round(x).toLocaleString("en-US");
   const pct = (x) => x == null ? "?" : (x * 100).toFixed(1) + "%";
   const day = (s) => s ? new Date(s).toLocaleDateString([], { month: "short", day: "numeric" }) : "?";
   const dur = (x) => x == null ? null : x < 60 ? `${x}s` : `${Math.floor(x / 60)}m ${x % 60}s`;
   const byId = () => Object.fromEntries((data.posts || []).map((p) => [p.id, p]));
-  const postLinks = (ids) => {
+  const postLinks = (ids, limit = 3) => {
     const m = byId();
-    return (ids || []).filter((i) => m[i]).map((i) => `<a class="inl" href="${esc(m[i].url)}" target="_blank" rel="noopener">${day(m[i].created_at)} · ${k(m[i].views)}</a>`).join(" ");
+    return (ids || []).filter((i) => m[i]).slice(0, limit).map((i) => `<a class="inl" href="${esc(m[i].url)}" target="_blank" rel="noopener">${day(m[i].created_at)} · ${k(m[i].views)}</a>`).join(" ");
   };
   const section = (title, html, hint) => `<section class="pf-sec"><h3>${esc(title)}</h3>${hint ? `<p class="hint">${esc(hint)}</p>` : ""}${html}</section>`;
   const noReport = () => `<div class="none">No Claude analysis in this record. Press Re-analyze: it uses the stored posts and does not touch X.</div>`;
@@ -22,6 +23,16 @@
   function overview() {
     const p = data.profile, m = data.metrics, c = m.cadence, r = data.report;
     const stat = (v, l) => `<div class="pf-stat"><b>${v}</b><span>${l}</span></div>`;
+    const top = r ? r.repeat.slice(0, 3) : [];
+    return `
+      <div class="pf-who"><b>${esc(p.name)}</b> <span class="hint">@${esc(p.handle)}</span></div>
+      <div class="pf-stats">${stat(k(p.followers), "followers")}${stat(k(m.median_views_30), "typical views")}${stat(m.breakouts, "viral posts, ≥5× typical")}${stat(c.per_day, "posts per day")}</div>
+      ${r ? section("In short", r.summary.map((l) => `<p class="pf-line">${esc(l)}</p>`).join("")) : noReport()}
+      ${top.length ? section("Start with this", `<ol class="pf-top">${top.map((x) => `<li>${esc(x.item)}</li>`).join("")}</ol><button id="pfMoreRepeat" class="link">All tactics and how to test them</button>`) : ""}`;
+  }
+
+  function details() {
+    const m = data.metrics, c = m.cadence, r = data.report, p = data.profile;
     const max = Math.max(...c.hours_utc, 1);
     const hours = c.hours_utc.map((n, h) => `<div class="pf-hour" title="${h}:00 UTC: ${n} posts"><i style="height:${Math.round((n / max) * 100)}%"></i><span>${h % 6 ? "" : h}</span></div>`).join("");
     const types = Object.entries(c.types).map(([t, s]) => `<tr><td>${esc(t)}</td><td class="n">${Math.round(s * 100)}%</td><td class="n">${k(c.median_views_by_type[t])}</td></tr>`).join("");
@@ -29,18 +40,19 @@
       ${a.followups.length ? `<div class="pf-links">${a.followups.map((f) => `<a class="inl" href="${esc(f.url)}" target="_blank" rel="noopener">${f.kind} · ${k(f.views)}</a>`).join(" ")}</div>` : ""}</li>`).join("");
     const b = m.borrowed;
     const targets = b.top_targets.map(([t, n]) => `@${esc(t)} ×${n}`).join(", ");
-    return `
-      <div class="pf-who"><b>${esc(p.name)}</b> <span class="hint">@${esc(p.handle)}${p.verified ? " · verified" : ""} · joined ${p.joined ? new Date(p.joined).getFullYear() : "?"}</span><p>${richText(p.bio)}</p>
-      ${p.pinned_url ? `<a class="inl" href="${esc(p.pinned_url)}" target="_blank" rel="noopener">pinned post</a>` : ""}</div>
-      <div class="pf-stats">${stat(k(p.followers), "followers")}${stat(k(p.following), "following")}${stat(k(p.posts_total), "posts total")}
-        ${stat(k(m.median_views_30), "median views, last 30")}${stat(pct(m.median_er), "median engagement")}${stat(m.median_bookmark_ratio ?? "?", "bookmarks / likes")}
-        ${stat(m.breakouts, "breakouts, ≥5× median")}${stat(c.per_day, "posts per day")}</div>
-      ${r ? section("Summary", r.summary.map((l) => `<p class="pf-line">${esc(l)}</p>`).join("")) : ""}
-      ${section("Format mix", `<table class="pf-table"><thead><tr><th>Type</th><th class="n">Share</th><th class="n">Median views</th></tr></thead><tbody>${types}</tbody></table>`, `${c.posts} original posts and ${c.replies} replies over ${c.days} days`)}
-      ${section("Posting hours, UTC", `<div class="pf-hours">${hours}</div>`)}
-      ${arts ? section("Article chains", `<ul class="pf-list">${arts}</ul>`, "Own quotes, replies and links to the article within 7 days") : ""}
-      ${section("Borrowed reach", `<p class="pf-line">${b.count} quotes or replies to accounts with at least ${k(b.threshold_followers)} followers, ${b.breakouts_on_event} of them breakouts.${targets ? ` Top targets: ${targets}.` : ""}</p>
-        <p class="pf-line">Breakout rate within 72 h after such a post: ${b.rate_after == null ? "no data" : pct(b.rate_after)} (${b.posts_after} posts). Elsewhere: ${b.rate_other == null ? "no data" : pct(b.rate_other)} (${b.posts_other} posts).</p>`)}`;
+    const list = (title, xs) => xs && xs.length ? `<h4>${title}</h4><ul class="pf-list">${xs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+    const fold = (key, title, html) => html ? `<details class="pf-fold" data-key="${key}" ${opened.has(key) ? "open" : ""}><summary>${title}</summary>${html}</details>` : "";
+    setTimeout(() => document.querySelectorAll(".pf-fold").forEach((d) => (d.ontoggle = () => { d.open ? opened.add(d.dataset.key) : opened.delete(d.dataset.key); })), 0);
+    return [
+      fold("patterns", "Hooks and post structures", r ? list("Hook types", r.hooks) + list("Opening lines", r.openers) + list("Structures", r.structures) + list("CTAs", r.ctas) + list("What flops", r.flops) : ""),
+      fold("account", "Account", `<p class="pf-line">${richText(p.bio)}</p><p class="hint">@${esc(p.handle)}${p.verified ? " · verified" : ""} · joined ${p.joined ? new Date(p.joined).getFullYear() : "?"} · ${k(p.following)} following · ${k(p.posts_total)} posts total · engagement ${pct(m.median_er)} · bookmarks/likes ${m.median_bookmark_ratio ?? "?"}</p>${p.pinned_url ? `<a class="inl" href="${esc(p.pinned_url)}" target="_blank" rel="noopener">pinned post</a>` : ""}`),
+      fold("mix", "Format mix", `<p class="hint">${c.posts} original posts and ${c.replies} replies over ${c.days} days</p><table class="pf-table"><thead><tr><th>Type</th><th class="n">Share</th><th class="n">Median views</th></tr></thead><tbody>${types}</tbody></table>`),
+      fold("hours", "Posting hours, UTC", `<div class="pf-hours">${hours}</div>`),
+      fold("articles", "Article chains", arts ? `<p class="hint">Own quotes, replies and links to the article within 7 days</p><ul class="pf-list">${arts}</ul>` : ""),
+      fold("borrowed", "Borrowed reach", `<p class="pf-line">${b.count} quotes or replies to accounts with at least ${k(b.threshold_followers)} followers, ${b.breakouts_on_event} of them breakouts.${targets ? ` Top targets: ${targets}.` : ""}</p>
+        <p class="pf-line">Breakout rate within 72 h after such a post: ${b.rate_after == null ? "no data" : pct(b.rate_after)} (${b.posts_after} posts). Elsewhere: ${b.rate_other == null ? "no data" : pct(b.rate_other)} (${b.posts_other} posts).</p>`),
+      fold("raw", "All posts", raw()),
+    ].join("");
   }
 
   function chart() {
@@ -71,7 +83,7 @@
       const cx = x(p.t), cy = y(p.views), s = 5.5;
       return `<path class="breakout" d="M${cx} ${cy - s}L${cx + s} ${cy}L${cx} ${cy + s}L${cx - s} ${cy}Z"/>`;
     }).join("");
-    const legend = [["dot", "Post views"], ["med7", "Median, 7 posts"], ["med30", "Median, 30 posts"], ["brk", "Breakout, ≥5× median"], ["bnd", "Inferred phase"]]
+    const legend = [["dot", "Posts"], ["med7", "Median, 7 posts"], ["med30", "Median, 30 posts"], ["brk", "Viral, ≥5× median"], ["bnd", "Phase"]]
       .map(([c, l]) => `<span><i class="lg ${c}"></i>${l}</span>`).join("");
     setTimeout(() => wireChart(pts, x, L, R, W), 0);
     return `<div class="pf-legend">${legend}</div>
@@ -105,9 +117,8 @@
     const snaps = data.snapshots || [];
     if (!snaps.length) return "";
     const opts = (sel) => snaps.map((s, i) => `<option value="${i}" ${i === sel ? "selected" : ""}>${new Date(s.ts).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</option>`).join("");
-    return section("Real history: snapshots", snaps.length < 2
-      ? `<p class="hint">One snapshot so far: followers ${num(snaps[0].followers)}. Each new scrape adds one, so a real follower history builds up from here.</p>`
-      : `<div class="pf-compare"><select id="pfSnapA" aria-label="From snapshot">${opts(0)}</select><span class="hint">to</span><select id="pfSnapB" aria-label="To snapshot">${opts(snaps.length - 1)}</select></div><div id="pfDelta"></div>`);
+    if (snaps.length < 2) return "";
+    return section("Real history: snapshots", `<div class="pf-compare"><select id="pfSnapA" aria-label="From snapshot">${opts(0)}</select><span class="hint">to</span><select id="pfSnapB" aria-label="To snapshot">${opts(snaps.length - 1)}</select></div><div id="pfDelta"></div>`);
   }
 
   function renderDelta() {
@@ -128,7 +139,7 @@
     const phases = r && r.phases.length ? r.phases.map((ph) => `<article class="pf-phase"><header><b>${day(ph.start)} – ${day(ph.end)}</b><span class="conf ${esc(ph.confidence)}">${conf[ph.confidence] || "guess"}</span></header>
         <p>${esc(ph.changed)}</p><p class="hint">Likely trigger: ${esc(ph.trigger)}</p><div class="pf-links">${postLinks(ph.post_ids)}</div></article>`).join("")
       : m.phases.map((ph) => `<article class="pf-phase"><header><b>${day(ph.start)} – ${day(ph.end)}</b></header><p>${ph.change === "start" ? "Start of data" : `Median ${ph.change} ${ph.ratio}×`}, median ${k(ph.median_views)} views, ${ph.posts} posts</p></article>`).join("");
-    return `<p class="pf-note">${icon("triangle-alert")}<span><b>Inference.</b> X does not expose follower history. Phases come from the median views of original posts, not from follower counts.</span></p>
+    return `<p class="hint">${icon("triangle-alert")} Inferred from views: X hides follower history.</p>
       ${chart()}
       ${section("Growth timeline", phases || `<div class="none">No phases: too few posts</div>`, r ? "Dates, causes and confidence are Claude's reading of the numbers" : "Local median steps only")}
       ${snapshotsBlock()}`;
@@ -139,29 +150,25 @@
     const items = r && r.viral.length ? r.viral.map((v) => ({ v, p: m[v.post_id] })).filter((x) => x.p)
       : [...data.posts].filter((p) => p.ratio != null).sort((a, b) => b.ratio - a.ratio).slice(0, 10).map((p) => ({ v: null, p }));
     if (!items.length) return `<div class="none">No posts with views</div>`;
+    const shown = showAllViral ? items : items.slice(0, 5);
     setTimeout(() => {
+      const more = $("pfMoreViral");
+      if (more) more.onclick = () => { showAllViral = true; render(); };
       const box = $("pfViral");
       if (!box) return;
-      items.forEach(({ v, p }) => {
+      shown.forEach(({ v, p }) => {
         const age_min = (Date.now() - new Date(p.created_at)) / 60000;
         const el = card({ ...p, author: data.profile, age_min, score: `${Math.round(p.ratio)}×`, label: p.breakout ? "hot" : "normal", why: v ? v.why : "", parts: {} });
         el.querySelector(".seen-btn").remove();
         el.querySelector(".score").title = "views vs the rolling median of the previous 30 posts";
         if (v) {
           const facts = [["Hook", v.hook], ["Format", v.format], ["Topic", v.topic], ["Timing", v.timing], ["Borrowed reach", v.borrowed]].filter((f) => f[1]);
-          el.querySelector(".body").insertAdjacentHTML("beforebegin", `<dl class="pf-facts">${facts.map(([a, b]) => `<dt>${a}</dt><dd>${esc(b)}</dd>`).join("")}</dl>`);
+          el.querySelector(".card-foot").insertAdjacentHTML("beforebegin", `<details class="pf-fold-in"><summary>Breakdown</summary><dl class="pf-facts">${facts.map(([a, b]) => `<dt>${a}</dt><dd>${esc(b)}</dd>`).join("")}</dl></details>`);
         }
         box.appendChild(el);
       });
     }, 0);
-    return `${r ? "" : `<p class="hint">Top by ratio, without reasons: no Claude analysis in this record.</p>`}<div id="pfViral" class="pf-cards"></div>`;
-  }
-
-  function patterns() {
-    const r = data.report;
-    if (!r) return noReport();
-    const list = (t, xs, hint) => xs.length ? section(t, `<ul class="pf-list">${xs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`, hint) : "";
-    return list("Hook types", r.hooks) + list("Opening lines", r.openers, "Templates, not quotes") + list("Post structures", r.structures) + list("CTAs", r.ctas) + list("What consistently flops", r.flops);
+    return `${r ? "" : `<p class="hint">Top by ratio, without reasons: no Claude analysis in this record.</p>`}<div id="pfViral" class="pf-cards"></div>${shown.length < items.length ? `<button id="pfMoreViral" class="ghost">Show all ${items.length}</button>` : ""}`;
   }
 
   const doneKey = () => `pf-done-${data.profile.handle}-${data.id}`;
@@ -232,7 +239,7 @@
     URL.revokeObjectURL(a.href);
   }
 
-  const RENDER = { overview, growth, viral, patterns, repeat, raw };
+  const RENDER = { overview, growth, viral, repeat, details };
 
   function render() {
     const meta = $("pfMeta"), tabs = $("pfTabs"), body = $("pfBody");
@@ -257,6 +264,7 @@
     }
     body.innerHTML = RENDER[tab]();
     if (tab === "growth") renderDelta();
+    if ($("pfMoreRepeat")) $("pfMoreRepeat").onclick = () => { tab = "repeat"; render(); };
   }
 
   async function loadHistory(selectId) {
@@ -273,6 +281,7 @@
   async function open(ref) {
     const [h, id] = ref.split("/");
     data = await api(`/api/profiles/${encodeURIComponent(h)}/analyses/${encodeURIComponent(id)}`);
+    showAllViral = false;
     $("pfHandle").value = data.profile.handle;
     render();
   }
@@ -299,7 +308,7 @@
       wasJob = job;
       // a job in the other section keeps Run and Analyze disabled: show why in the sidebar
       $("navProfiles").querySelector(".nav-busy").classList.toggle("hidden", !job);
-      $("navFeed").querySelector(".nav-busy").classList.toggle("hidden", !(s.running && s.kind !== "profile"));
+      $("navFeed").querySelector(".nav-busy").classList.toggle("hidden", !(s.running && s.kind === "run"));
     },
   };
 

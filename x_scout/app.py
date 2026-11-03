@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import browser, db, pipeline, profile_store
+from . import browser, db, pipeline, post_analysis, profile_store
 from .config import PORT, PROFILE_MD, ROOT
 
 STATIC = ROOT / "x_scout" / "static"
@@ -178,6 +178,41 @@ async def profile_reanalyze(handle: str, analysis_id: str):
     except (ValueError, FileNotFoundError):
         raise HTTPException(404, "no such analysis")
     _spawn(pipeline.reanalyze_profile(handle, analysis_id, pipeline.load_settings()))
+    return {"ok": True}
+
+
+@app.post("/api/posts/analyze")
+async def analyze_post(body: dict = Body(...)):
+    _busy()
+    try:
+        ref = post_analysis.parse_ref(body.get("input"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _spawn(pipeline.analyze_post(ref, pipeline.load_settings()))
+    return {"ok": True, "key": ref["key"]}
+
+
+@app.get("/api/posts")
+def posts():
+    return post_analysis.history()
+
+
+@app.get("/api/posts/{key}")
+def post_record(key: str):
+    try:
+        return post_analysis.load(key)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "no such post")
+
+
+@app.post("/api/posts/{key}/reanalyze")
+async def post_reanalyze(key: str):
+    _busy()
+    try:
+        post_analysis.load(key)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "no such post")
+    _spawn(pipeline.reanalyze_post(key, pipeline.load_settings()))
     return {"ok": True}
 
 

@@ -47,6 +47,7 @@ const ICON = {
   reply: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/>',
   bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><path d="M12 7v6"/><path d="M15 10H9"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  "file-search": '<path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M4.3 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v6"/><circle cx="5" cy="14" r="3"/><path d="m9 18-1.5-1.5"/>',
   "columns-2": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',
   "sliders-horizontal": '<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>',
   "user-search": '<circle cx="10" cy="7" r="4"/><path d="M10.3 15H7a4 4 0 0 0-4 4v2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-1.9-1.9"/>',
@@ -186,7 +187,7 @@ async function refresh() {
     $("reBtn").disabled = busy || !(current && current.has_candidates);
     $("runBtn").classList.toggle("hidden", s.running);
     $("stopBtn").classList.toggle("hidden", !s.running);
-    const topJob = !s.running || s.kind !== "profile";  // a profile job shows its progress in the panel
+    const topJob = !s.running || s.kind === "run";  // profile and post jobs show progress in their own section
     $("progress").classList.toggle("hidden", (!s.running && !logOpen) || !topJob);
     $("step").textContent = s.running ? `${s.step || "starting"}…` : "Last run finished";
     document.querySelector(".spinner").style.display = s.running ? "" : "none";
@@ -200,10 +201,11 @@ async function refresh() {
     } else $("timing").textContent = "";
     $("log").textContent = (s.log || []).join("\n");
     $("log").scrollTop = 1e9;
-    if (wasRunning && !s.running && s.kind !== "profile") await loadRuns(s.run_id);
-    else if (s.running && s.kind !== "profile" && s.run_id && $("runSelect").value != s.run_id) await loadRuns(s.run_id);
+    if (wasRunning && !s.running && s.kind === "run") await loadRuns(s.run_id);
+    else if (s.running && s.kind === "run" && s.run_id && $("runSelect").value != s.run_id) await loadRuns(s.run_id);
     wasRunning = s.running;
     if (window.profilePanel) await window.profilePanel.onState(s);
+    if (window.postPanel) await window.postPanel.onState(s);
   } catch {}
 }
 async function loop() { await refresh(); setTimeout(loop, wasRunning ? 1000 : 4000); }
@@ -219,9 +221,7 @@ function topicRow(t = { name: "", query: "" }) {
   return row;
 }
 
-async function openSettings() {
-  const panel = $("settings");
-  if (!panel.classList.contains("hidden")) return panel.classList.add("hidden");
+async function loadSettings() {
   const [s, p] = await Promise.all([api("/api/settings"), api("/api/profile")]);
   $("topics").innerHTML = "";
   s.topics.forEach((t) => $("topics").appendChild(topicRow(t)));
@@ -230,7 +230,6 @@ async function openSettings() {
   $("pfPosts").value = s.profile_max_posts; $("pfDays").value = s.profile_max_days; $("pfReplies").value = s.profile_max_replies;
   $("profile").value = p.text;
   $("saveMsg").textContent = p.custom ? "" : "Profile is the example: edit it to describe yourself.";
-  panel.classList.remove("hidden");
 }
 
 async function saveSettings() {
@@ -246,11 +245,15 @@ async function saveSettings() {
   });
   await post("/api/profile", { text: $("profile").value });
   $("saveMsg").textContent = "Saved.";
-  setTimeout(() => $("settings").classList.add("hidden"), 600);
 }
 
 // ---- sidebar: one section at a time ----
-const VIEWS = { feed: ["viewFeed", "navFeed", "columns-2", "Topics"], profiles: ["viewProfiles", "navProfiles", "user-search", "Profiles"] };
+const VIEWS = {
+  feed: ["viewFeed", "navFeed", "columns-2", "Topics"],
+  profiles: ["viewProfiles", "navProfiles", "user-search", "Profiles"],
+  post: ["viewPost", "navPost", "file-search", "Post"],
+  settings: ["viewSettings", "settingsBtn", "sliders-horizontal", "Settings"],
+};
 function setView(view) {
   if (!VIEWS[view]) view = "feed";
   for (const [key, [pane, nav]] of Object.entries(VIEWS)) {
@@ -259,12 +262,12 @@ function setView(view) {
     if (key === view) $(nav).setAttribute("aria-current", "page"); else $(nav).removeAttribute("aria-current");
   }
   try { localStorage.setItem("view", view); } catch {}
+  if (view === "settings") loadSettings();
 }
 for (const [view, [, nav, ic, label]] of Object.entries(VIEWS)) {
   $(nav).innerHTML = `${icon(ic)}<span>${label}</span><i class="nav-busy hidden"></i>`;
   $(nav).onclick = () => setView(view);
 }
-$("settingsBtn").innerHTML = `${icon("sliders-horizontal")}<span>Settings</span>`;
 try { setView(localStorage.getItem("view") || "feed"); } catch { setView("feed"); }
 
 const act = (fn) => async () => { try { await fn(); } catch (e) { alert(e.message); } refresh(); };
@@ -273,7 +276,6 @@ $("stopBtn").onclick = act(() => post("/api/stop"));
 $("loginBtn").onclick = act(() => post("/api/login"));
 $("checkBtn").onclick = act(() => post("/api/login/check"));
 $("reBtn").onclick = act(() => post(`/api/runs/${$("runSelect").value}/reanalyze`));
-$("settingsBtn").onclick = openSettings;
 $("saveBtn").onclick = act(saveSettings);
 $("addTopic").onclick = () => document.querySelectorAll(".topic-row").length < 5 && $("topics").appendChild(topicRow());
 $("runSelect").onchange = (e) => loadRun(e.target.value);
