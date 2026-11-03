@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>X Scout</title>
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <aside class="side">
@@ -26,11 +26,11 @@
 
   <div class="content">
   <div id="viewFeed">
-  <header class="top">
+  <header class="top feed-top">
     <div class="actions">
-      <select id="runSelect" title="Past runs"></select>
-      <button id="reBtn" class="ghost" title="Run Claude again on this run's posts, no scraping">Re-analyze</button>
-      <button id="logBtn" class="ghost">Log</button>
+      <select id="runSelect" title="Past runs" aria-label="Past runs"></select>
+      <button id="reBtn" class="link" title="Run Claude again on this run's posts, no scraping">Re-analyze</button>
+      <button id="logBtn" class="link">Log</button>
       <button id="runBtn" class="primary">Run</button>
       <button id="stopBtn" class="ghost hidden" title="Stop this run. Posts scraped so far are not kept">Stop</button>
     </div>
@@ -46,10 +46,10 @@
     <pre id="log" class="log hidden"></pre>
   </section>
 
-  <main class="wrap">
-    <div id="meta" class="summary"></div>
-    <nav id="tabs" class="tabs"></nav>
-    <div id="board" class="board"></div>
+  <main class="feed">
+    <nav id="tabs" class="ftabs" aria-label="Topics"></nav>
+    <div id="meta" class="fmeta"></div>
+    <div id="board" class="fboard"></div>
     <div id="empty" class="empty hidden">
       <h2>No runs yet</h2>
       <p>1. <b>Log in to X</b> (a Chrome window opens, use your secondary account).<br>
@@ -98,14 +98,14 @@
   <section id="viewSettings" class="settings hidden">
     <div class="settings-grid">
       <div>
-        <h3>Topics <small>(up to 5)</small></h3>
-        <p class="hint">Name is shown in the UI. Query is what goes to X search (any X operators). Leave empty and Claude writes one on the next run.</p>
+        <h3>Topics <small>(up to 10)</small></h3>
+        <p class="hint">Name is shown in the UI. Query is what goes to X search (any X operators). Extra queries, separated by <code>;</code>, catch posts the main one misses: one more Top search each. Leave a field empty and Claude writes it on the next run.</p>
         <div id="topics"></div>
         <button id="addTopic" class="ghost small">+ topic</button>
         <h3>Scraping</h3>
         <label>Language <input id="lang" size="4" placeholder="en"></label>
-        <label>Posts per tab (Top / Latest) <input id="perMode" type="number" min="10" max="60"></label>
-        <label>Candidates per topic sent to Claude <input id="cands" type="number" min="10" max="60"></label>
+        <label>Posts per search (Top / Latest) <input id="perMode" type="number" min="10" max="80"></label>
+        <label>Candidates per topic sent to Claude <input id="cands" type="number" min="10" max="80"></label>
         <label>Model <select id="model"><option>sonnet</option><option>haiku</option><option>opus</option></select></label>
         <label>Summary language <input id="gistLang" size="10" placeholder="English"></label>
         <label class="row"><input id="headless" type="checkbox"> run browser hidden (headless)</label>
@@ -126,8 +126,8 @@
   </section>
 
   </div>
-  <script src="/static/app.js?v=2"></script>
-  <script src="/static/profile.js?v=2"></script>
-  <script src="/static/post.js?v=2"></script>
+  <script src="/static/app.js?v=3"></script>
+  <script src="/static/profile.js?v=3"></script>
+  <script src="/static/post.js?v=3"></script>
 </body>
 </html>

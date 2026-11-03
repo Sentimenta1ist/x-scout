@@ -1,4 +1,4 @@
-"""scrape → score → pick candidates → claude -p → up to 5 posts to reply to and 5 to save per topic."""
+"""scrape → score → pick candidates → claude -p per topic → up to 6 posts to reply to and 6 to save per topic."""
 import asyncio
 import json
 import time
@@ -12,8 +12,8 @@ from .scoring import project_views, score
 DEFAULT_SETTINGS = {
     "topics": [{"name": "AI agents", "query": ""}, {"name": "Automation", "query": ""}],
     "lang": "en",
-    "per_mode": 40,          # posts per search tab (Top and Latest) per topic
-    "candidates": 40,        # posts per topic sent to Claude
+    "per_mode": 50,          # posts per search tab (Top and Latest) per topic; extra queries read 2/3 of it
+    "candidates": 50,        # posts per topic sent to Claude
     "headless": True,
     "model": "sonnet",
     "gist_lang": "English",  # language of the short per-post summary
@@ -23,7 +23,7 @@ DEFAULT_SETTINGS = {
     "profile_max_replies": 60,   # 0 = skip the replies tab
     "profile_model": "sonnet",
 }
-MAX_TOPICS = 5
+MAX_TOPICS = 10
 
 # live state of the current run, polled by the UI
 # kind: "run" (topic search), "profile" or "post"; one job at a time, they share Chrome and Stop
@@ -88,22 +88,13 @@ def score_posts(posts):
     return posts
 
 
-def fallback_columns(candidates):
-    """Used when Claude fails: top posts by local score under "save", so the run still shows something."""
-    out = []
-    for name, posts in candidates.items():
-        top = sorted(posts, key=lambda p: p["scored"]["score"], reverse=True)[:analyze.MAX_PER_COLUMN]
-        out.append({"topic": name, "candidates": len(posts), "reply": [],
-                    "save": [{**analyze.slim(p), "why": "", "angle": "", "q": None} for p in top]})
-    return out
-
-
 def analyze_candidates(candidates, settings):
-    prompt, index = analyze.digest(load_profile(), candidates)
-    _log(f"claude -p ({settings['model']}): {sum(len(v) for v in candidates.values())} posts, ~{len(prompt) // 4} tokens of input")
-    data, usage = analyze.run_claude(prompt, model=settings["model"], system=analyze.ranking_system(settings["gist_lang"]))
+    n = sum(len(v) for v in candidates.values())
+    _log(f"claude -p ({settings['model']}): {n} posts, one call per topic, {analyze.PARALLEL} at a time")
+    result, usage, errors = analyze.rank_topics(load_profile(), candidates, model=settings["model"],
+                                                gist_lang=settings["gist_lang"], log=_log)
     _log(f"claude done: in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
-    return analyze.assemble(data, index, candidates), usage
+    return result, usage, errors
 
 
 def _eta(n_topics):
@@ -125,23 +116,38 @@ async def run(settings):
     run_id = db.create_run(topics)
     state["run_id"] = run_id
     try:
-        missing = [t["name"] for t in topics if not (t.get("query") or "").strip()]
+        # an empty query, or a topic that never got extra queries ("extra" absent) → Claude writes them once
+        missing = [t for t in topics if not (t.get("query") or "").strip() or "extra" not in t]
         if missing:
             _progress(0, 1, "writing search queries")
-            _log(f"no query for {', '.join(missing)}: asking Claude to write them")
-            queries, usage = await asyncio.to_thread(analyze.generate_queries, load_profile(), missing, settings["model"])
-            stats["query_gen"] = usage
+            _log(f"writing queries for {', '.join(t['name'] for t in missing)}")
+            try:
+                queries, usage = await asyncio.to_thread(analyze.generate_queries, load_profile(), missing, settings["model"])
+                stats["query_gen"] = usage
+            except Exception as e:  # searching with what we have beats failing the run
+                _log(f"query writing failed, searching with the current queries: {e}")
+                queries = {}
             for t in topics:
-                if t["name"] in queries:
-                    t["query"] = queries[t["name"]]
+                q = queries.get(t["name"])
+                if not q:
+                    continue
+                if q["query"] and not (t.get("query") or "").strip():
+                    t["query"] = q["query"]
                     _log(f"{t['name']} => {t['query']}")
+                if "extra" not in t:
+                    t["extra"] = q["extra"]
+                    for e in q["extra"]:
+                        _log(f"{t['name']} +> {e}")
             save_settings({**settings, "topics": topics})
 
-        searches = len(topics) * 2
+        searches = browser.search_count(topics, settings["lang"])
+        scrape_status = {}
         # scraping ≈ 85% of the bar, analysis the rest
         scraped = await browser.scrape(
             topics, per_mode=settings["per_mode"], lang=settings["lang"], headless=settings["headless"], log=_log,
-            on_step=lambda i, label: _progress(i * 0.85, searches, label))
+            on_step=lambda i, label: _progress(i * 0.85, searches, label), status=scrape_status)
+        if scrape_status.get("rate_limited"):
+            stats["rate_limited"] = True
         stats["scraped"] = sum(len(v) for v in scraped.values())
         stats["scrape_s"] = round(time.time() - t0)
 
@@ -155,13 +161,11 @@ async def run(settings):
         db.save_candidates(run_id, candidates)
         stats["sent"] = sum(len(v) for v in candidates.values())
 
-        _progress(0.88, 1, f"Claude is ranking {stats['sent']} posts")
-        try:
-            result, usage = await asyncio.to_thread(analyze_candidates, candidates, settings)
-            stats["claude"] = usage
-        except Exception as e:  # keep the scrape, show local ranking
-            _log(f"claude failed, showing local ranking: {e}")
-            result, stats["claude_error"] = fallback_columns(candidates), str(e)[:500]
+        _progress(0.88, 1, f"Claude is reading {stats['sent']} posts, topic by topic")
+        result, usage, errors = await asyncio.to_thread(analyze_candidates, candidates, settings)
+        stats["claude"] = usage
+        if errors:
+            stats["claude_error"] = "; ".join(f"{k}: {v}" for k, v in errors.items())[:500]
         stats["analyze_s"] = round(time.time() - t0) - stats["scrape_s"]
         stats["total_s"] = round(time.time() - t0)
         db.finish_run(run_id, "done", result, stats)
@@ -189,16 +193,19 @@ async def reanalyze(run_id, settings):
     src = db.get_run(run_id)
     if not src or not src.get("candidates"):
         raise ValueError("run has no stored candidates")
-    state.update(running=True, kind="run", step="Claude is ranking stored posts", log=[], progress=0.5, eta_s=20, started=time.time())
+    state.update(running=True, kind="run", step="Claude is ranking stored posts", log=[], progress=0.5, eta_s=60, started=time.time())
     new_id = db.create_run(src["topics"])
     state["run_id"] = new_id
     try:
         db.save_candidates(new_id, src["candidates"])
-        result, usage = await asyncio.to_thread(analyze_candidates, src["candidates"], settings)
+        t0 = time.time()
+        result, usage, errors = await asyncio.to_thread(analyze_candidates, src["candidates"], settings)
         prev = src.get("stats") or {}
-        db.finish_run(new_id, "done", result, {"claude": usage, "reanalyzed_from": run_id, "scraped": prev.get("scraped"),
-                                               "sent": sum(len(v) for v in src["candidates"].values()),
-                                               "total_s": usage["duration_s"]})
+        stats = {"claude": usage, "reanalyzed_from": run_id, "scraped": prev.get("scraped"),
+                 "sent": sum(len(v) for v in src["candidates"].values()), "total_s": round(time.time() - t0)}
+        if errors:
+            stats["claude_error"] = "; ".join(f"{k}: {v}" for k, v in errors.items())[:500]
+        db.finish_run(new_id, "done", result, stats)
         _log("done")
     except asyncio.CancelledError:
         _log("stopped")

@@ -2,7 +2,7 @@
 
 # X Scout
 
-**Your daily X briefing for up to 5 topics: what is taking off, what everyone talks about, and what is useful to *you*. Runs locally, ranked by Claude.**
+**Your daily X briefing for up to 10 topics: what is taking off, what everyone talks about, and what is useful to *you*. Runs locally, ranked by Claude.**
 
 [![tests](https://github.com/Sentimenta1ist/x-scout/actions/workflows/test.yml/badge.svg)](https://github.com/Sentimenta1ist/x-scout/actions/workflows/test.yml)
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
@@ -20,22 +20,22 @@ Scrolling X to find posts worth reading or replying to eats an hour a day. Brows
 
 1. searches X for your topics in a real browser, the way a person would;
 2. scores every post for early virality locally, for free;
-3. sends only the best ~40 candidates per topic to **one** `claude -p` call as compact text;
-4. shows up to 5 posts to reply to and up to 5 to read per topic. Only posts rated 4–5 are shown, and reply picks need real reach, so a column can stay empty.
+3. sends the best ~50 candidates per topic to `claude -p` as compact text, **one call per topic** (3 at a time);
+4. shows up to 6 posts to reply to and up to 6 to read per topic, each with a short breakdown. Only posts rated 4–5 are shown, and reply picks need real reach, so a section can stay empty.
 
 | Column | What lands there |
 |---|---|
-| **Reply** | Fresh posts with reach where *you* can add something concrete, based on a short profile you write. Comes with a suggested reply angle. |
+| **Reply** | Fresh posts with reach where *you* can add something concrete, based on a short profile you write. Comes with two ready replies: a reaction and a question. |
 | **Read** | Posts with real substance worth reading or saving: deep dives, data, postmortems, genuinely new tools. |
 
-Every card has Claude's one-line take, a 1–2 sentence summary of the post (in a language you pick), a 1–5 depth rating, the post metrics and a link to open it on X. Reply cards also get a **reply angle** (copy button).
+The feed is one quiet column. Each post shows a 1–2 sentence summary (in a language you pick) and why it is worth your time; reply picks add a **say** and an **ask** reply with a copy button. **Breakdown** folds out what is going on around the post, why it spreads (from views vs followers and bookmarks per like), what to take from it, what is unverified or hype, the full text and the numbers.
 
 ## Features
 
-- **Up to 5 topics**, each with an optional X search query (`OR`, quotes, `-exclude`, `from:` …). Leave it empty and Claude writes one from the topic name and your profile.
+- **Up to 10 topics**, each with an optional X search query (`OR`, quotes, `-exclude`, `from:` …) and extra queries that catch posts the main one misses. Leave them empty and Claude writes them from the topic name and your profile.
 - **Real Chrome, no DOM scraping.** Playwright drives your installed Google Chrome with its own profile and reads X's own search JSON. Human-paced: randomized pauses, a few scrolls, nothing is clicked. Stops on a rate limit or a login prompt.
 - **Local virality score** (0–100): projected views from age, engagement per view, reach vs the author's usual level (from history, or from followers on day one), and acceleration between runs.
-- **One Claude call per run**, tuned for tokens (see [Token cost](#token-cost)).
+- **One Claude call per topic**, 3 in parallel; a topic that fails falls back to local ranking, the rest keep their picks.
 - **Progress bar with ETA**, run summary (posts, tokens, time), run history, **Re-analyze** to rerun Claude on stored posts without scraping.
 - **"Seen" marks**, light and dark theme, works on a phone-width window.
 - Everything stays on your machine: SQLite, browser profile and settings live in `data/`.
@@ -92,12 +92,12 @@ Open **Post**, paste a link to a post or article, or its text. One screen tells 
 
 ```mermaid
 flowchart LR
-    A[Topics + queries] --> B[Chrome via Playwright<br/>X search: Top + Latest]
+    A[Topics + queries] --> B[Chrome via Playwright<br/>X search: Top + Latest<br/>+ extra queries]
     B -->|SearchTimeline JSON| C[Parse + dedupe]
     C --> D[Local virality score<br/>+ author history]
-    D --> E[Top ~40 per topic<br/>one line per post]
-    E --> F["claude -p (Sonnet)<br/>one call per run"]
-    F --> G[Reply · Read, up to 5 each<br/>why + reply angle]
+    D --> E[Top ~50 per topic<br/>one line per post]
+    E --> F["claude -p (Sonnet)<br/>one call per topic"]
+    F --> G[Reply · Read, up to 6 each<br/>breakdown + replies]
     D --> H[(SQLite: posts,<br/>snapshots, runs)]
     H -.->|acceleration next run| D
 ```
@@ -128,7 +128,7 @@ cd x-scout
 The app opens at http://127.0.0.1:8765.
 
 1. **Log in to X.** A Chrome window opens; log in and it closes itself once you reach the home feed. The session is stored in `data/browser-profile` and lasts for months. Use a **secondary account**: any automation carries some risk for the account that runs it.
-2. **Settings.** Add up to 5 topics, write a few lines in **About me** (what you do, what is useful, what is noise). See [`profile.example.md`](profile.example.md).
+2. **Settings.** Add up to 10 topics, write a few lines in **About me** (what you do, what is useful, what is noise). See [`profile.example.md`](profile.example.md).
 3. **Run.** 3 topics take ~3 minutes, mostly paced search.
 
 Try the UI without an X account, using made-up demo data:

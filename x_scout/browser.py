@@ -89,15 +89,25 @@ async def interactive_login(timeout_s=600):
 
 
 def build_queries(topic, lang):
+    """Main query: Top of the last 2 days and Latest with some traction. Each extra query (other words for the same
+    subject) adds one Top search: narrow queries were the main reason topics came back with 20 posts."""
     q = topic.get("query") or topic["name"]
     lang_op = f" lang:{lang}" if lang else ""
-    since = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    return [
-        # most engaged posts of the last ~day: "what everyone is talking about"
+    since = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
+    out = [
+        # most engaged posts of the last ~2 days: "what everyone is talking about"
         ("top", f"{q}{lang_op} -filter:replies since:{since}"),
         # fresh posts that already got some traction: early risers
         ("live", f"{q}{lang_op} -filter:replies min_faves:5"),
     ]
+    for extra in (topic.get("extra") or [])[:2]:
+        if extra.strip():
+            out.append(("top", f"{extra.strip()}{lang_op} -filter:replies since:{since}"))
+    return out
+
+
+def search_count(topics, lang=""):
+    return sum(len(build_queries(t, lang)) for t in topics)
 
 
 async def _search_one(page, mode, query, target, log):
@@ -139,9 +149,12 @@ async def _search_one(page, mode, query, target, log):
     return batch
 
 
-async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_step=lambda i, label: None):
-    """Returns {topic_name: [post, ...]} with posts deduped within a topic."""
+async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_step=lambda i, label: None, status=None):
+    """Returns {topic_name: [post, ...]} with posts deduped within a topic. A 429 after some posts were read ends the scrape
+    early and keeps them (status["rate_limited"] = True), so the run still gets analyzed."""
     out = {}
+    status = status if status is not None else {}
+    step = 0
     async with _lock, async_playwright() as pw:
         ctx = await _context(pw, headless=headless)
         try:
@@ -150,14 +163,28 @@ async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_st
                 if i:
                     await asyncio.sleep(random.uniform(8, 15))
                 seen = {}
-                for j, (mode, query) in enumerate(build_queries(topic, lang)):
-                    tab = "Top" if mode == "top" else "Latest"
-                    on_step(i * 2 + j, f"{topic['name']}: {tab} (topic {i + 1}/{len(topics)})")
-                    log(f"{topic['name']}: searching {mode} — {query}")
-                    for p in await _search_one(page, mode, query, per_mode, log):
-                        p.setdefault("found_in", mode)
-                        seen.setdefault(p["id"], p)
-                    await asyncio.sleep(random.uniform(4, 8))
+                queries = build_queries(topic, lang)
+                try:
+                    for j, (mode, query) in enumerate(queries):
+                        tab = "Top" if mode == "top" else "Latest"
+                        label = f"{tab}, extra query {j - 1}" if j >= 2 else tab
+                        on_step(step, f"{topic['name']}: {label} (topic {i + 1}/{len(topics)})")
+                        step += 1
+                        log(f"{topic['name']}: searching {mode} — {query}")
+                        # extra queries are a second net: fewer posts each, the main query stays the core
+                        target = per_mode if j < 2 else max(per_mode * 2 // 3, 10)
+                        for p in await _search_one(page, mode, query, target, log):
+                            p.setdefault("found_in", mode)
+                            seen.setdefault(p["id"], p)
+                        await asyncio.sleep(random.uniform(4, 8))
+                except RateLimited:
+                    if seen:
+                        out[topic["name"]] = list(seen.values())
+                    if not out:
+                        raise
+                    status["rate_limited"] = True
+                    log(f"X rate limit (429) at {topic['name']}: stopping the search, analyzing the {sum(len(v) for v in out.values())} posts read so far")
+                    break
                 out[topic["name"]] = list(seen.values())
                 log(f"{topic['name']}: {len(seen)} unique posts")
         finally:

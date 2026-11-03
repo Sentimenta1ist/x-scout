@@ -16,6 +16,7 @@ const LEGACY_COLS = [
   ["global", "Global", "what everyone talks about", "globe"],
   ["useful", "For me", "useful for my work", "target"],
 ];
+const MAX_TOPICS = 10;
 let current = null;      // loaded run
 let activeTopic = null;
 let wasRunning = false;
@@ -100,6 +101,47 @@ function card(p) {
   return div;
 }
 
+// ---- topic feed: one quiet column, the breakdown folds out ----
+const SECTIONS = [["reply", "Reply", "fresh posts with reach where you have something to add"],
+                  ["save", "Read", "worth reading or saving"]];
+const DETAILS = [["context", "What is going on"], ["spread", "Why it spreads"], ["take", "What to take"], ["doubt", "Careful"]];
+
+function copyBtn(text) {
+  const b = document.createElement("button");
+  b.className = "link fcopy"; b.title = "Copy"; b.innerHTML = icon("copy");
+  b.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText(text).then(() => { b.classList.add("copied"); setTimeout(() => b.classList.remove("copied"), 1200); }); };
+  return b;
+}
+
+function pick(p, col) {
+  const el = document.createElement("article");
+  el.className = "fpick" + (seen.has(p.id) ? " seen" : "");
+  const name = (p.author.name || p.author.handle).replace(/\s*\(.*?\)\s*/g, " ").trim();
+  const meta = [`<b>${esc(name)}</b>`, `@${esc(p.author.handle)}`, `${k(p.author.followers)} followers`, age(p.age_min)].join(" · ");
+  const headline = p.gist || (p.text || "").split("\n")[0].slice(0, 220);
+  const replies = col === "reply" ? [["say", p.say || p.angle], ["ask", p.ask]].filter(([, t]) => t) : [];
+  const details = DETAILS.filter(([key]) => p[key]).map(([key, label]) => `<div class="fd ${key}"><span>${label}</span><p>${esc(p[key])}</p></div>`).join("");
+  const parts = Object.entries(p.parts || {}).map(([a, b]) => `${a} ${b}`).join(" · ");
+  el.innerHTML = `
+    <div class="fmeta-row">
+      <span class="fwho">${meta}</span>
+      ${p.q === 5 ? `<span class="ftop" title="Claude rated it 5/5">top</span>` : ""}
+      <a class="fopen" href="${p.url}" target="_blank" rel="noopener" title="Open on X">↗</a>
+    </div>
+    <p class="fgist">${esc(headline)}</p>
+    ${p.why ? `<p class="fwhy">${esc(p.why)}</p>` : ""}
+    ${replies.length ? `<ul class="freplies">${replies.map(([kind, t]) => `<li><span class="fkind">${kind}</span><span class="ftext">${esc(t)}</span></li>`).join("")}</ul>` : ""}
+    <details class="fmore">
+      <summary><span class="fnums">${k(p.views)} views · ${k(p.likes)} likes · ${k(p.replies)} replies · ${k(p.bookmarks)} saves</span><span class="fopen-label">Breakdown</span></summary>
+      ${details}
+      <div class="fd"><span>Post</span><p class="ftext-full">${richText(p.text)}</p>${p.quoted ? `<p class="fquoted">${richText(p.quoted.slice(0, 600))}</p>` : ""}</div>
+      <div class="ffoot"><span title="${esc(parts)}">virality ${p.score}${p.q ? ` · depth ${p.q}/5` : ""}</span><button class="link seen-btn">${seen.has(p.id) ? "unmark seen" : "mark seen"}</button></div>
+    </details>`;
+  el.querySelectorAll(".freplies li").forEach((li, i) => li.appendChild(copyBtn(replies[i][1])));
+  el.querySelector(".seen-btn").onclick = () => { seen.toggle(p.id); renderBoard(); };
+  return el;
+}
+
 function renderBoard() {
   const board = $("board"), tabs = $("tabs");
   board.innerHTML = ""; tabs.innerHTML = "";
@@ -113,43 +155,43 @@ function renderBoard() {
   const tout = (c ? c.output_tokens : 0) + (qg ? qg.output_tokens : 0);
   const usd = (c ? c.cost_usd_equiv : 0) + (qg ? qg.cost_usd_equiv : 0);
   const mins = (x) => x == null ? null : x < 60 ? `${x}s` : `${Math.floor(x / 60)}m ${x % 60}s`;
-  const item = (v, label, cls = "") => v == null ? "" : `<span class="${cls}"><b>${v}</b> ${label}</span>`;
   const when = new Date(current.started_at);
-  $("meta").innerHTML = [
-    item(when.toLocaleDateString([], { month: "short", day: "numeric" }) + ", " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), ""),
-    item(s.scraped, "scraped"),
-    item(s.sent, "sent to Claude"),
-    c || qg ? item(`${k(tin)} / ${k(tout)}`, "tokens in / out") : "",
-    c || qg ? item(`$${usd.toFixed(2)}`, "at API prices") : "",
-    item(mins(s.scrape_s), "scraping"),
-    item(c ? mins(Math.round(c.duration_s)) : null, "Claude"),
-    item(mins(s.total_s), "total"),
-    s.reanalyzed_from ? item(`#${s.reanalyzed_from}`, "re-analysis of") : "",
-    s.claude_error ? item("Claude failed", "local ranking shown", "error") : "",
-    s.error ? item(esc(s.error).slice(0, 80), "", "error") : "",
-  ].filter(Boolean).join("");
+  const bits = [
+    when.toLocaleDateString([], { month: "short", day: "numeric" }) + ", " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    s.scraped != null ? `${s.scraped} posts read` : null,
+    s.sent != null ? `${s.sent} to Claude` : null,
+    mins(s.total_s),
+    c || qg ? `$${usd.toFixed(2)}` : null,
+    s.reanalyzed_from ? `re-analysis of #${s.reanalyzed_from}` : null,
+  ].filter(Boolean).map(esc);
+  const warn = [s.rate_limited ? "X rate limit: search stopped early" : null, s.claude_error ? "Claude failed on some topics, local ranking there" : null,
+                s.error ? String(s.error).slice(0, 80) : null].filter(Boolean).map((w) => `<span class="error">${esc(w)}</span>`);
+  $("meta").innerHTML = bits.join(" · ") + (warn.length ? " · " + warn.join(" · ") : "");
+  $("meta").title = c || qg ? `tokens in ${k(tin)} / out ${k(tout)} · scraping ${mins(s.scrape_s) || "?"} · Claude ${c ? mins(Math.round(c.duration_s)) : "?"}` : "";
   if (!result) return;
 
   if (!result.find((t) => t.topic === activeTopic)) activeTopic = result[0] && result[0].topic;
   for (const t of result) {
+    const n = t.reply || t.save ? (t.reply || []).length + (t.save || []).length : LEGACY_COLS.reduce((a, [key]) => a + (t[key] || []).length, 0);
     const b = document.createElement("button");
-    b.innerHTML = `${esc(t.topic)}<span class="count">${t.candidates}</span>`;
+    b.innerHTML = `${esc(t.topic)}<span class="count">${n}</span>`;
+    b.title = `${t.candidates} candidates`;
     b.className = t.topic === activeTopic ? "active" : "";
     b.onclick = () => { activeTopic = t.topic; renderBoard(); };
     tabs.appendChild(b);
   }
   const t = result.find((x) => x.topic === activeTopic);
   if (!t) return;
-  const cols = t.reply || t.save ? COLS : LEGACY_COLS;
-  board.style.setProperty("--cols", cols.length);
-  for (const [key, title, sub, ic] of cols) {
-    const col = document.createElement("section");
-    col.className = "col";
+  const sections = t.reply || t.save ? SECTIONS : LEGACY_COLS.map(([key, title, sub]) => [key, title, sub]);
+  for (const [key, title, sub] of sections) {
     const items = t[key] || [];
-    col.innerHTML = `<h2 class="col-${key}">${icon(ic)}${title}<span class="n">${items.length}</span><span class="sub">${sub}</span></h2>`;
-    if (!items.length) col.insertAdjacentHTML("beforeend", `<div class="none">Nothing worth it in this run</div>`);
-    items.forEach((p) => col.appendChild(card(p)));
-    board.appendChild(col);
+    const sec = document.createElement("section");
+    sec.className = "fsec";
+    sec.innerHTML = `<h2>${title}<span class="n">${items.length}</span><span class="sub">${sub}</span></h2>`;
+    if (!items.length) sec.insertAdjacentHTML("beforeend", `<p class="fnone">Nothing strong enough in this run.</p>`);
+    if (key === "save" && t.local) sec.insertAdjacentHTML("beforeend", `<p class="fnone">Claude failed on this topic: top posts by local score, no breakdown.</p>`);
+    items.forEach((p) => sec.appendChild(key === "reply" || key === "save" ? pick(p, key) : card(p)));
+    board.appendChild(sec);
   }
 }
 
@@ -215,7 +257,8 @@ function topicRow(t = { name: "", query: "" }) {
   row.className = "topic-row";
   row.innerHTML = `<input class="tname" placeholder="AI agents" value="${esc(t.name)}">
     <input class="tquery" placeholder='query, e.g. ("AI agent" OR agentic) -crypto' value="${esc(t.query || "")}">
-    <button class="ghost small" title="Remove topic">${icon("x")}</button>`;
+    <button class="ghost small" title="Remove topic">${icon("x")}</button>
+    <input class="textra" placeholder="extra queries; separated by ;  (empty: Claude writes 2)" value="${esc((t.extra || []).join(" ; "))}">`;
   row.querySelector("button").onclick = () => row.remove();
   return row;
 }
@@ -232,12 +275,15 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
-  const topics = [...document.querySelectorAll(".topic-row")].map((r) => ({
-    name: r.querySelector(".tname").value.trim(), query: r.querySelector(".tquery").value.trim(),
-  })).filter((t) => t.name);
-  if (topics.length > 5) return ($("saveMsg").textContent = "Max 5 topics.");
+  const topics = [...document.querySelectorAll(".topic-row")].map((r) => {
+    const t = { name: r.querySelector(".tname").value.trim(), query: r.querySelector(".tquery").value.trim() };
+    const extra = r.querySelector(".textra").value.split(";").map((x) => x.trim()).filter(Boolean);
+    if (extra.length) t.extra = extra;  // left out → Claude writes extra queries on the next run
+    return t;
+  }).filter((t) => t.name);
+  if (topics.length > MAX_TOPICS) return ($("saveMsg").textContent = `Max ${MAX_TOPICS} topics.`);
   await post("/api/settings", {
-    topics, lang: $("lang").value.trim(), per_mode: +$("perMode").value || 30, candidates: +$("cands").value || 25,
+    topics, lang: $("lang").value.trim(), per_mode: +$("perMode").value || 50, candidates: +$("cands").value || 50,
     model: $("model").value, headless: $("headless").checked, gist_lang: $("gistLang").value.trim() || "English",
     profile_max_posts: +$("pfPosts").value || 300, profile_max_days: +$("pfDays").value || 120,
     profile_max_replies: $("pfReplies").value === "" ? 60 : +$("pfReplies").value,
@@ -276,7 +322,7 @@ $("loginBtn").onclick = act(() => post("/api/login"));
 $("checkBtn").onclick = act(() => post("/api/login/check"));
 $("reBtn").onclick = act(() => post(`/api/runs/${$("runSelect").value}/reanalyze`));
 $("saveBtn").onclick = act(saveSettings);
-$("addTopic").onclick = () => document.querySelectorAll(".topic-row").length < 5 && $("topics").appendChild(topicRow());
+$("addTopic").onclick = () => document.querySelectorAll(".topic-row").length < MAX_TOPICS && $("topics").appendChild(topicRow());
 $("runSelect").onchange = (e) => loadRun(e.target.value);
 $("logToggle").onclick = () => $("log").classList.toggle("hidden");
 $("logBtn").onclick = () => { logOpen = !logOpen; $("log").classList.toggle("hidden", !logOpen); refresh(); };

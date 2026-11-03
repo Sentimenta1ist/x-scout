@@ -24,10 +24,68 @@ def test_parse_picks():
     d = parse_picks(REPLY)
     agents = d["topics"][0]
     assert agents["topic"] == "AI agents"
-    assert agents["reply"] == [{"n": 3, "q": 4, "gist": "автор выпустил MCP-сервер", "why": "young MCP post, fast",
-                                "angle": "ask about auth"}]
-    assert agents["save"] == [{"n": 1, "q": 5, "gist": "разбор архитектуры", "why": "real numbers", "angle": ""}]
+    r = agents["reply"][0]
+    assert (r["n"], r["q"], r["gist"], r["why"], r["angle"]) == (3, 4, "автор выпустил MCP-сервер", "young MCP post, fast", "ask about auth")
+    s = agents["save"][0]
+    assert (s["n"], s["q"], s["gist"], s["why"], s["angle"]) == (1, 5, "разбор архитектуры", "real numbers", "")
     assert d["topics"][1]["reply"][0]["n"] == 9
+
+
+BLOCKS = """R 2 5
+**GIST** вышел новый рантайм
+CONTEXT: до этого агенты падали на ретраях
+WHY конкретные цифры
+SPREAD reach x3, bm 0.6
+TAKE ставь лимит на вызовы
+SAY "this is the retry loop everyone hits"
+ASK what broke first at 10k runs?
+S 1 4
+GIST разбор
+DOUBT цифры не проверены
+SAY stray reply on a read pick
+"""
+
+
+def test_parse_block_format_without_topic_header():
+    d = parse_picks(BLOCKS)
+    t = d["topics"][0]
+    r = t["reply"][0]
+    assert (r["n"], r["q"]) == (2, 5)
+    assert r["gist"] == "вышел новый рантайм" and r["context"] == "до этого агенты падали на ретраях"
+    assert r["spread"] == "reach x3, bm 0.6" and r["take"] == "ставь лимит на вызовы"
+    assert r["say"] == r["angle"] == "this is the retry loop everyone hits" and r["ask"] == "what broke first at 10k runs?"
+    assert t["save"][0]["doubt"] == "цифры не проверены"
+
+
+def test_assemble_single_topic_uses_headerless_block_and_drops_replies_on_save():
+    a = [_post("1"), _post("2")]
+    res = assemble(parse_picks(BLOCKS), {1: a[0], 2: a[1]}, {"Agents": a})[0]
+    assert [p["id"] for p in res["reply"]] == ["2"] and res["reply"][0]["ask"] == "what broke first at 10k runs?"
+    assert [p["id"] for p in res["save"]] == ["1"] and res["save"][0]["say"] == "" and res["save"][0]["angle"] == ""
+
+
+def test_rank_topics_calls_per_topic_and_falls_back_on_failure(monkeypatch):
+    a, b = [_post("1")], [_post("2")]
+
+    def fake(prompt, model=None, system=None, **kw):
+        if "TOPIC: Bad" in prompt:
+            raise RuntimeError("boom")
+        return parse_picks("S 1 4\nGIST g\n"), {"input_tokens": 10, "output_tokens": 5, "cost_usd_equiv": 0.01, "duration_s": 2}
+
+    monkeypatch.setattr(analyze, "run_claude", fake)
+    res, usage, errors = analyze.rank_topics("me", {"Good": a, "Bad": b, "Empty": []}, log=lambda m: None)
+    assert [t["topic"] for t in res] == ["Good", "Bad", "Empty"]
+    assert [p["id"] for p in res[0]["save"]] == ["1"]
+    assert res[1].get("local") and [p["id"] for p in res[1]["save"]] == ["2"] and "Bad" in errors
+    assert usage["calls"] == 1 and usage["input_tokens"] == 10
+
+
+def test_generate_queries_parses_main_and_extras(monkeypatch):
+    text = "AI => (LLM OR GPT)\nAI +> inference cost\nAI +> \"open weights\"\nAI +> third is dropped\nOther +> x\nCS +> postgres vacuum\n"
+    monkeypatch.setattr(analyze, "run_claude", lambda *a, **k: (text, {}))
+    out, _ = analyze.generate_queries("me", [{"name": "AI", "query": ""}, {"name": "CS", "query": "kafka"}])
+    assert out["AI"] == {"query": "(LLM OR GPT)", "extra": ["inference cost", '"open weights"']}
+    assert out["CS"] == {"query": None, "extra": ["postgres vacuum"]}
 
 
 def test_assemble_maps_index_and_rejects_cross_topic():
@@ -101,7 +159,7 @@ def test_select_candidates_keeps_room_for_fresh_posts():
 def test_select_candidates_filters_and_dedupes():
     posts = [_post(str(i), score=i) for i in range(40)]
     posts.append({**_post("dup"), "text": "post number 39 with some text"})  # same text as 39
-    posts.append(_post("old", age=60 * 48))
+    posts.append(_post("old", age=60 * 72))
     posts.append(_post("tiny", views=50))
     picked = select_candidates(posts, limit=25)
     ids = {p["id"] for p in picked}
@@ -130,7 +188,7 @@ def test_stop_claude_kills_the_running_call(tmp_path, monkeypatch):
 
     t = threading.Thread(target=call)
     t.start()
-    while analyze._proc is None:
+    while not analyze._procs:
         time.sleep(0.01)
     analyze.stop_claude()
     t.join(5)
