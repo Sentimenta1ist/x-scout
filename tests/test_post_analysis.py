@@ -18,7 +18,8 @@ TAKE Open with the number | Use your own 4% to 61% case
 REPEAT adapt | Fits his audience
 REPLY say | "same here, the slow part was the queue"
 REPLY ask | what broke first when you moved it?
-REPLY maybe | wrong kind is ignored
+REPLY decir | etiqueta traducida
+REPLY preguntar | por que?
 BASE [number before] to [number after] in [time]. here is what changed:
 BASE one two three four five six seven eight nine ten
 DRAFT the same schema, flattened: tool calls went from 4% to 61%
@@ -55,7 +56,8 @@ def test_parse_report_and_copy_guard():
     assert r["viral"] == [{"what": "Number first", "how": "14% to 3% in the opening line"}]
     assert r["useful"] == ["Check tool calls before they run"] and r["empty"] == ["The 3x claim has no source"]
     assert r["draft"] == ["the same schema, flattened: tool calls went from 4% to 61%"] and r["copies_dropped"] == 2
-    assert r["replies"] == [{"kind": "say", "text": "same here, the slow part was the queue"}, {"kind": "ask", "text": "what broke first when you moved it?"}]
+    assert r["replies"] == [{"kind": "say", "text": "same here, the slow part was the queue"}, {"kind": "ask", "text": "what broke first when you moved it?"},
+                            {"kind": "say", "text": "etiqueta traducida"}, {"kind": "ask", "text": "por que?"}]
     assert r["base"] == ["[number before] to [number after] in [time]. here is what changed:"]
 
 

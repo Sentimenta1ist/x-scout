@@ -30,7 +30,8 @@ Output plain text only, no markdown, exactly this format, best first:
 R <n> <q> | <gist> | <why> | <angle>
 S <n> <q> | <gist> | <why>
 q = quality, be strict: 5 rare, would send it to a friend; 4 clearly worth his time; 3 fine but forgettable; 1-2 weak. Most posts are 3 or lower, and only 4-5 are shown. gist: what the post says, 1-2 short sentences in {gist_lang}, so the reader can skip the full text; keep key numbers and names.
-why: <=12 words, concrete, no filler. angle (R only): the actual reply text, ready to send, in the language of the post, <=20 words."""
+why: <=12 words, concrete, no filler. angle (R only): the actual reply text, ready to send, in the language of the post, <=15 words, how a person actually types on X: casual, lowercase, fragments are fine, no jargon, not a polished sentence.
+The profile's stories are rare: most angles use none, each story at most once in the whole answer, and only when the post is directly about it."""
 
 
 def ranking_system(gist_lang="English"):

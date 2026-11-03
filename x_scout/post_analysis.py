@@ -62,11 +62,12 @@ USEFUL <a concrete thing the reader can apply or learn, with the specifics from 
 EMPTY <what is fluff, recycled, unverified or engagement bait, and why>
 TAKE <a technique for his own posts> | <how to apply it in his niche>
 REPEAT <yes/adapt/no> | <why, for his account and audience>
-REPLY <say or ask> | <a reply he could send under this post>
+REPLY <the English word say or ask> | <a reply he could send under this post>
 BASE <one line of a neutral template of this post with [placeholders], anyone could fill it; repeat the line type per line>
 DRAFT <one line of his own version of the post; repeat the line type per line>
 Counts: 1 VERDICT, 1 GIST, 2-4 VIRAL, 0-5 USEFUL (0 is fine), 0-4 EMPTY, 2-4 TAKE, 1 REPEAT, 2 REPLY say and 2 REPLY ask, BASE and DRAFT only if REPEAT is yes or adapt.
-REPLY sounds like a person typing fast: plain words anyone understands, under 100 characters, about one specific detail of this post. say = his own short point or real experience from READER. ask = an open question the author would want to answer, not yes/no. No praise, no "great post", no links, no pitch, no invented experience.
+REPLY is how a person actually types on X between other things, reacting to one detail of this post: casual, short, usually under 80 characters, lowercase, fragments are fine, words a non-engineer gets. Not a mini-analysis and not a polished sentence.
+say = a reaction or opinion. ask = a question he is really curious about, not yes/no, the kind you would ask a friend. No praise, no "great post", no links, no pitch, no jargon, no abbreviations. Never use READER's stories, numbers or job in REPLY.
 BASE keeps the post's order of moves (hook, proof, turn, ending), uses new wording and has no facts from the post.
 DRAFT uses only stories, numbers and experience given in READER, in his style, with the post's structure and never its sentences. No invented facts. Ground everything in this post, not in general advice."""
 
@@ -125,10 +126,11 @@ def parse_report(text, post_text=""):
             r["repeat"] = word if word in ("yes", "adapt", "no") else None
             r["repeat_why"] = " ".join(f[1:])
         elif kind == "REPLY":
+            # the label can come back translated or missing, the reply itself still counts
+            text = " ".join(f[1:]).strip().strip('"') if len(f) > 1 else rest.strip().strip('"')
             word = f[0].lower()
-            text = " ".join(f[1:]).strip().strip('"')
-            if text and word in ("say", "ask"):
-                r["replies"].append({"kind": word, "text": text})
+            if text:
+                r["replies"].append({"kind": word if word in ("say", "ask") else "ask" if "?" in text else "say", "text": text})
         elif kind in ("BASE", "DRAFT"):
             if _shingles(rest) & source:
                 r["copies_dropped"] += 1
