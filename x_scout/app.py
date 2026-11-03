@@ -13,6 +13,16 @@ from .config import PORT, PROFILE_MD, ROOT
 STATIC = ROOT / "x_scout" / "static"
 app = FastAPI(title="x-scout")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.middleware("http")
+async def always_revalidate(request, call_next):
+    """Local app with no build step: the browser must never keep an old app.js or style.css after an update."""
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 login_state = {"status": "unknown"}  # unknown | checking | waiting | ok | no
 _tasks = set()
 
