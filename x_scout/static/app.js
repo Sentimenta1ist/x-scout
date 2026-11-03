@@ -163,6 +163,7 @@ function renderBoard() {
     mins(s.total_s),
     c || qg ? `$${usd.toFixed(2)}` : null,
     s.reanalyzed_from ? `re-analysis of #${s.reanalyzed_from}` : null,
+    s.rate_wait_s ? `waited ${mins(s.rate_wait_s)} for X limit` : null,
   ].filter(Boolean).map(esc);
   const warn = [s.rate_limited ? "X rate limit: search stopped early" : null, s.claude_error ? "Claude failed on some topics, local ranking there" : null,
                 s.error ? String(s.error).slice(0, 80) : null].filter(Boolean).map((w) => `<span class="error">${esc(w)}</span>`);

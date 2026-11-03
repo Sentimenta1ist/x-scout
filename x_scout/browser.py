@@ -7,6 +7,7 @@ import asyncio
 import random
 import re
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -88,21 +89,23 @@ async def interactive_login(timeout_s=600):
             await ctx.close()
 
 
-def build_queries(topic, lang):
-    """Main query: Top of the last day and Latest with some traction. Each extra query (other words for the same
-    subject) adds one Top search over the same day: the window stays short, the net gets wider."""
+def build_queries(topic, lang, exact_window=True):
+    """Main query: Top of the last 24h and Latest with some traction. Each extra query (other words for the same
+    subject) adds one Top search over the same 24h. min_faves on Top skips posts the candidate filter would drop anyway:
+    every page read costs rate limit. since_time is exact; since: (a date) is the fallback and reaches back up to ~46h."""
     q = topic.get("query") or topic["name"]
     lang_op = f" lang:{lang}" if lang else ""
-    since = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+    window = f"since_time:{int(day_ago.timestamp())}" if exact_window else f"since:{day_ago:%Y-%m-%d}"
     out = [
         # most engaged posts of the last day: "what everyone is talking about"
-        ("top", f"{q}{lang_op} -filter:replies since:{since}"),
+        ("top", f"{q}{lang_op} -filter:replies min_faves:3 {window}"),
         # fresh posts that already got some traction: early risers
         ("live", f"{q}{lang_op} -filter:replies min_faves:5"),
     ]
     for extra in (topic.get("extra") or [])[:3]:
         if extra.strip():
-            out.append(("top", f"{extra.strip()}{lang_op} -filter:replies since:{since}"))
+            out.append(("top", f"{extra.strip()}{lang_op} -filter:replies min_faves:3 {window}"))
     return out
 
 
@@ -110,7 +113,58 @@ def search_count(topics, lang=""):
     return sum(len(build_queries(t, lang)) for t in topics)
 
 
-async def _search_one(page, mode, query, target, log):
+def search_plan(topics, lang, exact_window=True):
+    """Main searches of every topic first, extra queries after: when the rate limit runs out, the run loses
+    extra queries, not whole topics. → [(topic index, query index, mode, query)]"""
+    plan = [(i, j, mode, q) for i, t in enumerate(topics) for j, (mode, q) in enumerate(build_queries(t, lang, exact_window))]
+    return sorted(plan, key=lambda x: (x[1] >= 2, x[0], x[1]))
+
+
+MAX_WAIT_S = 16 * 60  # X's search window is 15 minutes
+
+
+class Budget:
+    """X sends x-rate-limit-remaining / -reset on its GraphQL responses. Reading them lets the scrape wait for the
+    reset instead of running into a 429."""
+    def __init__(self, log, on_wait=lambda left: None, reserve=2):
+        self.remaining, self.reset, self.calls, self.waited = None, None, 0, 0
+        self.log, self.on_wait, self.reserve = log, on_wait, reserve
+
+    def update(self, headers, code):
+        self.calls += 1
+        try:
+            self.remaining = int(headers.get("x-rate-limit-remaining"))
+            self.reset = int(headers.get("x-rate-limit-reset"))
+        except (TypeError, ValueError):
+            pass
+        if code == 429:
+            self.remaining = 0
+
+    def wait_s(self, now=None):
+        if self.remaining is None or self.remaining > self.reserve or not self.reset:
+            return 0
+        return max(self.reset - (now or time.time()) + 5, 0)
+
+    async def ensure(self):
+        """Sleep until the window resets if the budget is (almost) spent. False if the reset is unknown or too far."""
+        if self.remaining is not None and self.remaining <= self.reserve and not self.reset:
+            return False
+        wait = self.wait_s()
+        if not wait:
+            return True
+        if wait > MAX_WAIT_S:
+            return False
+        self.log(f"X search limit almost used ({self.calls} requests so far): waiting {round(wait / 60, 1)} min for the reset")
+        end = time.time() + wait
+        while (left := end - time.time()) > 0:
+            self.on_wait(left)
+            await asyncio.sleep(min(left, 5))
+        self.waited += wait
+        self.remaining = None
+        return True
+
+
+async def _search_one(page, mode, query, target, log, budget):
     batch = []
     status = {"code": None}
 
@@ -118,6 +172,7 @@ async def _search_one(page, mode, query, target, log):
         if "SearchTimeline" not in resp.url:
             return
         status["code"] = resp.status
+        budget.update(await resp.all_headers(), resp.status)
         if resp.status != 200:
             return
         try:
@@ -127,6 +182,8 @@ async def _search_one(page, mode, query, target, log):
 
     page.on("response", on_response)
     try:
+        if not await budget.ensure():
+            raise RateLimited()
         url = f"https://x.com/search?q={quote(query)}&src=typed_query" + ("&f=live" if mode == "live" else "")
         await page.goto(url, wait_until="domcontentloaded")
         await asyncio.sleep(random.uniform(3, 5))
@@ -136,6 +193,8 @@ async def _search_one(page, mode, query, target, log):
         while len(batch) < target and stale < 3:
             if status["code"] == 429:
                 raise RateLimited()
+            if budget.wait_s():  # out of budget mid-search: keep this page's posts, the next search waits
+                break
             before = len(batch)
             await page.mouse.wheel(0, random.randint(2500, 4000))
             await asyncio.sleep(random.uniform(2.5, 5.5))
@@ -146,48 +205,55 @@ async def _search_one(page, mode, query, target, log):
             log(f"  {mode}: X returned no search data (logged out or page changed?)")
     finally:
         page.remove_listener("response", on_response)
-    return batch
+    return batch, status["code"]
 
 
-async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_step=lambda i, label: None, status=None):
-    """Returns {topic_name: [post, ...]} with posts deduped within a topic. A 429 after some posts were read ends the scrape
-    early and keeps them (status["rate_limited"] = True), so the run still gets analyzed."""
-    out = {}
+async def scrape(topics, per_mode=40, lang="en", headless=True, log=print, on_step=lambda i, label: None, status=None,
+                 on_wait=lambda left: None):
+    """Returns {topic_name: [post, ...]} with posts deduped within a topic. Main searches of all topics run first, extra
+    queries after. When X's search budget runs out the scrape waits for the reset (up to MAX_WAIT_S); a 429 it can't wait
+    out ends the scrape early and keeps what was read (status["rate_limited"] = True), so the run still gets analyzed."""
     status = status if status is not None else {}
-    step = 0
+    seen = [{} for _ in topics]
+    budget = Budget(log, on_wait)
+    exact = True
+    plan = search_plan(topics, lang)
     async with _lock, async_playwright() as pw:
         ctx = await _context(pw, headless=headless)
         try:
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            for i, topic in enumerate(topics):
-                if i:
-                    await asyncio.sleep(random.uniform(8, 15))
-                seen = {}
-                queries = build_queries(topic, lang)
+            for step, (i, j, mode, query) in enumerate(plan):
+                topic = topics[i]
+                if not exact and mode == "top":
+                    query = build_queries(topic, lang, exact_window=False)[j][1]
+                tab = "Top" if mode == "top" else "Latest"
+                label = f"{tab}, extra query {j - 1}" if j >= 2 else tab
+                on_step(step, f"{topic['name']}: {label} ({step + 1}/{len(plan)} searches)")
+                log(f"{topic['name']}: searching {mode} — {query}")
                 try:
-                    for j, (mode, query) in enumerate(queries):
-                        tab = "Top" if mode == "top" else "Latest"
-                        label = f"{tab}, extra query {j - 1}" if j >= 2 else tab
-                        on_step(step, f"{topic['name']}: {label} (topic {i + 1}/{len(topics)})")
-                        step += 1
-                        log(f"{topic['name']}: searching {mode} — {query}")
-                        for p in await _search_one(page, mode, query, per_mode, log):
-                            p.setdefault("found_in", mode)
-                            seen.setdefault(p["id"], p)
-                        await asyncio.sleep(random.uniform(4, 8))
+                    batch, code = await _search_one(page, mode, query, per_mode, log, budget)
                 except RateLimited:
-                    if seen:
-                        out[topic["name"]] = list(seen.values())
-                    if not out:
+                    if not any(seen):
                         raise
                     status["rate_limited"] = True
-                    log(f"X rate limit (429) at {topic['name']}: stopping the search, analyzing the {sum(len(v) for v in out.values())} posts read so far")
+                    log(f"X rate limit (429) at {topic['name']}: stopping the search, analyzing the "
+                        f"{sum(len(s) for s in seen)} posts read so far")
                     break
-                out[topic["name"]] = list(seen.values())
-                log(f"{topic['name']}: {len(seen)} unique posts")
+                if exact and step == 0 and mode == "top" and code == 200 and not batch:
+                    exact = False  # X ignored since_time: fall back to the date form for the rest of the run
+                    log("  since_time returned nothing: using since:<date> for Top searches")
+                for p in batch:
+                    p.setdefault("found_in", mode)
+                    seen[i].setdefault(p["id"], p)
+                await asyncio.sleep(random.uniform(4, 8))
         finally:
             await ctx.close()
-    return out
+    for t, sn in zip(topics, seen):
+        log(f"{t['name']}: {len(sn)} unique posts")
+    log(f"{budget.calls} search requests" + (f", waited {round(budget.waited / 60, 1)} min for the limit reset" if budget.waited else ""))
+    status["search_requests"] = budget.calls
+    status["waited_s"] = round(budget.waited)
+    return {t["name"]: list(s.values()) for t, s in zip(topics, seen) if s or not status.get("rate_limited")}
 
 
 _GRAPHQL_OP = re.compile(r"/graphql/[^/]+/(\w+)")

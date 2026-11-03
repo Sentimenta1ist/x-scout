@@ -145,9 +145,13 @@ async def run(settings):
         # scraping ≈ 85% of the bar, analysis the rest
         scraped = await browser.scrape(
             topics, per_mode=settings["per_mode"], lang=settings["lang"], headless=settings["headless"], log=_log,
-            on_step=lambda i, label: _progress(i * 0.85, searches, label), status=scrape_status)
+            on_step=lambda i, label: _progress(i * 0.85, searches, label), status=scrape_status,
+            on_wait=lambda left: state.update(step=f"waiting for X search limit reset, {int(left // 60)}m {int(left % 60):02d}s left"))
         if scrape_status.get("rate_limited"):
             stats["rate_limited"] = True
+        stats["search_requests"] = scrape_status.get("search_requests")
+        if scrape_status.get("waited_s"):
+            stats["rate_wait_s"] = scrape_status["waited_s"]
         stats["scraped"] = sum(len(v) for v in scraped.values())
         stats["scrape_s"] = round(time.time() - t0)
 
