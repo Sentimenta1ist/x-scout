@@ -81,10 +81,10 @@ def test_rank_topics_calls_per_topic_and_falls_back_on_failure(monkeypatch):
 
 
 def test_generate_queries_parses_main_and_extras(monkeypatch):
-    text = "AI => (LLM OR GPT)\nAI +> inference cost\nAI +> \"open weights\"\nAI +> third is dropped\nOther +> x\nCS +> postgres vacuum\n"
+    text = "AI => (LLM OR GPT)\nAI +> inference cost\nAI +> \"open weights\"\nAI +> vllm\nAI +> fourth is dropped\nOther +> x\nCS +> postgres vacuum\n"
     monkeypatch.setattr(analyze, "run_claude", lambda *a, **k: (text, {}))
     out, _ = analyze.generate_queries("me", [{"name": "AI", "query": ""}, {"name": "CS", "query": "kafka"}])
-    assert out["AI"] == {"query": "(LLM OR GPT)", "extra": ["inference cost", '"open weights"']}
+    assert out["AI"] == {"query": "(LLM OR GPT)", "extra": ["inference cost", '"open weights"', "vllm"]}
     assert out["CS"] == {"query": None, "extra": ["postgres vacuum"]}
 
 
@@ -159,7 +159,7 @@ def test_select_candidates_keeps_room_for_fresh_posts():
 def test_select_candidates_filters_and_dedupes():
     posts = [_post(str(i), score=i) for i in range(40)]
     posts.append({**_post("dup"), "text": "post number 39 with some text"})  # same text as 39
-    posts.append(_post("old", age=60 * 72))
+    posts.append(_post("old", age=60 * 30))
     posts.append(_post("tiny", views=50))
     picked = select_candidates(posts, limit=25)
     ids = {p["id"] for p in picked}

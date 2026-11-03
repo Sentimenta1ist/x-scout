@@ -258,7 +258,7 @@ function topicRow(t = { name: "", query: "" }) {
   row.innerHTML = `<input class="tname" placeholder="AI agents" value="${esc(t.name)}">
     <input class="tquery" placeholder='query, e.g. ("AI agent" OR agentic) -crypto' value="${esc(t.query || "")}">
     <button class="ghost small" title="Remove topic">${icon("x")}</button>
-    <input class="textra" placeholder="extra queries; separated by ;  (empty: Claude writes 2)" value="${esc((t.extra || []).join(" ; "))}">`;
+    <input class="textra" placeholder="extra queries; separated by ;  (empty: Claude writes 3)" value="${esc((t.extra || []).join(" ; "))}">`;
   row.querySelector("button").onclick = () => row.remove();
   return row;
 }

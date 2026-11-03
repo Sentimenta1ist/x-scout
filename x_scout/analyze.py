@@ -78,7 +78,7 @@ def is_junk(text):
     return bool(_JUNK.search(text or ""))
 
 
-def select_candidates(posts, limit=25, max_age_h=48, fresh_h=12):
+def select_candidates(posts, limit=25, max_age_h=24, fresh_h=12):
     """posts carry 'age_min' and 'scored'. Keep a mix: fresh posts worth replying to, early risers, big posts of the day,
     high-engagement niche."""
     pool, dupes = [], set()
@@ -142,7 +142,7 @@ def digest(profile, by_topic):
 
 QUERY_SYSTEM = """You write X (Twitter) advanced-search queries. Input: reader profile, then topics, one per line: <topic name> | main: <query or NONE>.
 Goal: find many substantive posts on the topic the reader would care about. X search matches words literally, so a narrow query finds few posts.
-For a topic with main NONE write one main query: OR-groups of specific terms and quoted phrases. For every topic write 2 extra queries
+For a topic with main NONE write one main query: OR-groups of specific terms and quoted phrases. For every topic write 3 extra queries
 that reach posts the main query misses: other words people really use for the same subject (product names, jargon, everyday phrasing,
 problems and outcomes), not repeating the main query's terms, still strictly on topic. Avoid AND-chains of two OR-groups: one OR-group finds far more.
 Exclude obvious junk (-giveaway -airdrop, price talk where relevant). Max ~180 characters per query.
@@ -170,7 +170,7 @@ def generate_queries(profile, topics, model=None):
         entry = out.setdefault(match, {"query": None, "extra": []})
         if op == "=>":
             entry["query"] = q
-        elif len(entry["extra"]) < 2:
+        elif len(entry["extra"]) < 3:
             entry["extra"].append(q)
     return out, usage
 
