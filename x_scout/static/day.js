@@ -31,7 +31,7 @@
     const lab = document.createElement("label");
     lab.className = "dchk";
     lab.title = title;
-    lab.innerHTML = `<input type="checkbox" ${checks()[key] ? "checked" : ""}><span>${title}</span>`;
+    lab.innerHTML = `<input type="checkbox" ${checks()[key] ? "checked" : ""}>${title ? `<span>${title}</span>` : ""}`;
     lab.querySelector("input").onchange = (e) => setCheck(key, e.target.checked);
     return lab;
   }
@@ -194,7 +194,10 @@
       const li = document.createElement("li");
       if (it.key) {
         li.className = (checks()[it.key] ? "ok" : "") + (it.rec ? " rec" : "");
-        li.appendChild(box(it.key, it.rec ? "Claude" : "done"));
+        if (it.rec) li.title = "Claude's recommendation";
+        const b = box(it.key, "");
+        b.classList.add("cbox");
+        li.appendChild(b);
         li.insertAdjacentHTML("beforeend", `<span class="cl">${esc(it.label)}${it.note ? ` <i>${esc(it.note)}</i>` : ""}</span>`);
       } else {
         const ok = it.have >= it.need, over = it.max != null && it.have > it.max;

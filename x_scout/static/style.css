@@ -397,10 +397,12 @@ body { display: flex; min-height: 100vh; }
 .clist { list-style: none; margin: 6px 0 0; padding: 0; }
 .clist li { display: flex; gap: 10px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--line-2); font-size: 14px; }
 .clist li:first-child { border-top: 0; }
-.clist li.ok .cl { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.clist li.ok .cl { color: var(--muted); }
+.clist .cbox { min-width: 38px; }
+.clist .cbox input { width: 15px; height: 15px; }
 .clist li.rec .cl { color: var(--text-2); }
 .clist .cl i { font-style: normal; color: var(--muted); font-size: 12.5px; margin-left: 4px; }
-.clist .cnt { flex: none; min-width: 38px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
+.clist .cnt { flex: none; min-width: 38px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
 .clist li.ok .cnt { color: var(--good); }
 .clist .cnt.over { color: var(--hot); }
 .stage-toggles { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 10px; }
