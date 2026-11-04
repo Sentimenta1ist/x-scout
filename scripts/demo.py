@@ -202,6 +202,113 @@ def seed_post():
                                    "base": ["moved [N] [old tool things] to [new tool]. monthly bill: [before] → [after].", "full cost breakdown and the [N] things that broke:"], "draft": ["we automated a weekly report for a client: 6 hours down to 20 minutes.", "here is what it cost and the 3 things that broke:"], "copies_dropped": 0}})
 
 
+# Staged daily run: made-up accounts and stories, same shape as runs.stages from pipeline.run_day.
+DAY = {
+    "news": [
+        ("Ledger Daily", "ledgerdaily", 840000, 95, 412000, 6100, 410, 300, ["photo"],
+         "Northwind Software cuts 18% of staff and offers 6 months of pay, a $10k fund to start a company, and lets people keep their laptops.",
+         "Northwind cuts 18% of staff with a generous package; replies are split between 'classy' and 'still a layoff'.",
+         "Layoffs plus a nice package: the fear-of-replacement crowd and the 'good employer' crowd argue in the same thread.",
+         ["we're at the stage where people applaud how nicely they got fired", "6 months of pay is generous. it's also 6 months to find a job while every company cuts at once", "a $10k fund to start your own thing is the new severance"], 5),
+        ("Market Pulse", "marketpulse_hq", 1200000, 140, 268000, 3400, 220, 150, [],
+         "AI chip stocks fall 6% in early trading after two large data center projects were paused.",
+         "AI chip stocks drop after two data center projects are paused.",
+         "Money, the bubble question and jobs in one line. Easy to have an opinion.",
+         ["two paused projects and the whole ai trade shakes. how solid was 'infinite demand' really", "honest question: slow pop or just a tuesday?"], 4),
+        ("Civic Wire", "civicwire", 390000, 60, 88000, 2100, 130, 60, ["photo"],
+         "Voters in 21 of 24 towns approved limits on new data centers this week.",
+         "21 of 24 local votes restrict new data centers.",
+         "The AI backlash shows up at the ballot box, not on X. Fresh, few replies yet.",
+         ["the election won't slow down ai models. it'll slow down the buildings they run in", "ai companies sold to ceos and forgot towns get a vote"], 4),
+    ],
+    "big": [
+        ("Tech Ticker", "techticker", 2100000, 35, 21000, 380, 31, 90, [],
+         "Orbital Cloud offers voluntary exits to staff in four countries. Only its AI research unit is exempt.",
+         "Orbital Cloud pays staff to leave; only the AI unit is exempt.",
+         "Big account, 35 minutes old, 31 replies: an early reply here gets seen.",
+         ["the exemption list is the whole map of where the jobs are going"], ["would you take a month per year, or bet on the next round?"], 5),
+        ("Dana Reyes", "danareyes", 650000, 50, 14000, 290, 22, 40, [],
+         "Poll: 58% say AI will hurt society more than help. 74% don't want a data center nearby.",
+         "Poll: most people expect AI to do more harm than good.",
+         "Numbers everyone wants to comment on, replies still thin.",
+         ["most of the 58% used a chatbot this week"], ["do people hate ai, or what their boss plans to do with it?"], 4),
+    ],
+    "viral": [
+        ("Sam Ortiz", "samortiz_dev", 3800, 1400, 5200000, 24000, 2300, 3100, [],
+         "Can I ask a dumb tech question? Why do file paths on Windows use backslashes?",
+         "A 'dumb' everyday tech question: why Windows uses backslashes.",
+         "5.2M views from a 3.8k account: everyone knows a bit of the answer and wants to show it.",
+         "'dumb tech question' + an everyday software riddle", "yes, every couple of days: a riddle half the feed can answer",
+         "Hey @grok, dumb question: why do arrays start at 0 when every human counts from 1? who decided that",
+         "can i ask a dumb dev question. why is localhost 127.0.0.1 and not something simple", "what dumb question about my job did i stop asking years ago?", 5),
+        ("Jo Park", "jopark", 7100, 2600, 610000, 47000, 400, 2900, [],
+         "startup idea: a factory that makes RAM",
+         "One-line 'startup idea' about RAM prices.",
+         "47k likes on 7k followers: an obvious joke that hits a real pain of the AI boom.",
+         "'startup idea:' + something absurdly obvious", "yes, as an evening one-liner",
+         "Hey @grok, who actually makes money in the AI boom: labs, GPU makers, power plants or course sellers? pick one",
+         "startup idea: a job ai can't do", "what boring business wins the AI gold rush?", 4),
+    ],
+    "trash": [
+        ("Nia Cole", "niacole_", 33000, 12, 1100, 31, 8, 4, [],
+         "Gen Z can't find jobs so they pivot to trading. What's your plan B? Genuinely asking",
+         "", "", ["plan b should be a skill people pay for, not a chart"], 4),
+        ("Ravi Menon", "ravimenon", 98000, 9, 1700, 27, 14, 2, [],
+         "smart work is more important than hard work", "", "", ["smart work is just hard work you did earlier"], 4),
+    ],
+}
+SUMMARY = {
+    "lines": ["Layoff wave: Northwind cuts 18% with a generous package, Orbital Cloud pays staff to leave and keeps only its AI unit.",
+              "Backlash: polls and local votes go against data centers; AI chip stocks dip on paused projects."],
+    "recs": ["Post today: Northwind + Orbital Cloud in one post, ending with a two-option question.",
+             "Reply in the first hour under @techticker, where replies are still under 40.",
+             "Tomorrow: 'startup idea:' one-liner in the evening, the 'dumb tech question' format in the morning."],
+}
+
+
+def day_pick(stage, i, row):
+    if stage in ("news",):
+        name, handle, fol, age, views, likes, replies, bms, media, text, gist, why, take, q = row
+        extra = {"take": take}
+    elif stage == "big":
+        name, handle, fol, age, views, likes, replies, bms, media, text, gist, why, say, ask, q = row
+        extra = {"say": say, "ask": ask[0]}
+    elif stage == "viral":
+        name, handle, fol, age, views, likes, replies, bms, media, text, gist, why, fmt, rep, grok, rewrite, opinion, q = row
+        extra = {"format": fmt, "repeat": rep, "grok": grok, "rewrite": rewrite, "opinion": opinion}
+    else:
+        name, handle, fol, age, views, likes, replies, bms, media, text, gist, why, say, q = row
+        extra = {"say": say}
+    pid = f"demo-{stage}-{i}"
+    p = {"id": pid, "url": f"https://x.com/{handle}/status/{pid}", "text": text,
+         "created_at": (NOW - timedelta(minutes=age)).isoformat(),
+         "author": {"handle": handle, "name": name, "followers": fol, "verified": True},
+         "views": views, "likes": likes, "replies": replies, "reposts": 0, "quotes": 0, "bookmarks": bms,
+         "media": media, "quoted": None, "age_min": age, "found_in": None, "score": 60, "label": "rising", "parts": {},
+         "key": f"{stage}:{pid}", "take": [], "say": [], "q": q, "stage": stage}
+    if gist:
+        p["gist"] = gist
+    if why:
+        p["why"] = why
+    p.update(extra)
+    return p
+
+
+def seed_day(topics_result):
+    run_id = db.create_run([])
+    db.set_kind(run_id, "day")
+    usage = {"input_tokens": 6500, "output_tokens": 2600, "cost_usd_equiv": 0.11, "duration_s": 38.0}
+    for stage, rows in DAY.items():
+        picks = [day_pick(stage, i, r) for i, r in enumerate(rows, 1)]
+        db.update_stage(run_id, stage, status="ready", scraped=len(rows) * 30, picks=picks, count=len(picks), usage=usage)
+    db.update_stage(run_id, "topics", status="ready", scraped=236, count=sum(len(v) for t in topics_result for v in t.values() if isinstance(v, list)), usage=usage)
+    db.update_stage(run_id, "summary", **SUMMARY, usage=usage)
+    db.set_check(run_id, "news:demo-news-1", True)
+    db.set_check(run_id, "big:demo-big-1", True)
+    db.finish_run(run_id, "done", topics_result, {"stages": ["news", "big", "viral", "trash", "topics"], "search_requests": 41, "rate_wait_s": 0, "total_s": 769})
+    return run_id
+
+
 def main():
     db.init()
     topics = [{"name": t, "query": ""} for t in DEMO]
@@ -219,11 +326,12 @@ def main():
         "scraped": 236, "sent": 120, "scrape_s": 171, "analyze_s": 19, "total_s": 190,
         "claude": {"input_tokens": 21400, "output_tokens": 1900, "cost_usd_equiv": 0.09, "duration_s": 18.4},
     })
-    SETTINGS_JSON.write_text(json.dumps({"topics": topics}, indent=2))
+    day_id = seed_day(result)
+    SETTINGS_JSON.write_text(json.dumps({"topics": topics, "own_handle": "mira_builds"}, indent=2))
     PROFILE_MD.write_text((ROOT / "profile.example.md").read_text())
     seed_profile()
     seed_post()
-    print(f"demo run #{run_id} and profile @{PROFILE_DEMO['handle']} written")
+    print(f"demo runs #{run_id}, #{day_id} (daily) and profile @{PROFILE_DEMO['handle']} written")
 
 
 if __name__ == "__main__":

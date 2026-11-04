@@ -28,7 +28,7 @@ DEFAULT_SETTINGS = {
     "trash_limit": 3,            # trash replies a day; the checklist warns above it
     "topic_extra_queries": False,  # topics stage: main + author searches only, extras cost too much rate limit
     "search_pause": [10, 20],    # seconds between two searches of a staged run
-    "own_handle": "sentimentGod",
+    "own_handle": "",            # your account, for the weekly self-check in the checklist
 }
 MAX_TOPICS = 10
 

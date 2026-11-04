@@ -42,6 +42,11 @@ async def main(base, only=None):
     async def open_log(page):
         await page.click("#logBtn")
 
+    def stage(label):
+        async def go(page):
+            await page.click(f"#stageTabs button:has-text('{label}')")
+        return go
+
     def open_tab(label):
         async def go(page):
             await page.click("#navProfiles")
@@ -54,6 +59,9 @@ async def main(base, only=None):
         if only != "profile":
             await shot(b, base, "board-dark", "dark", IDLE)
             await shot(b, base, "board-light", "light", IDLE)
+            await shot(b, base, "day-big", "dark", IDLE, before=stage("Big accounts"))
+            await shot(b, base, "day-viral", "dark", IDLE, before=stage("Viral"))
+            await shot(b, base, "day-checklist", "dark", IDLE, height=760, before=stage("Checklist"))
             await shot(b, base, "running", "dark", RUNNING, height=520, before=open_log)
             await shot(b, base, "settings", "dark", IDLE, height=640, before=open_settings)
             await shot(b, base, "mobile", "dark", IDLE, width=390, height=844)
