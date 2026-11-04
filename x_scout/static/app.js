@@ -21,6 +21,7 @@ let current = null;      // loaded run
 let activeTopic = null;
 let wasRunning = false;
 let logOpen = false;
+let lastSig = "";
 
 // "seen" marks are a per-browser convenience
 const seen = (() => {
@@ -139,6 +140,11 @@ function pick(p, col) {
     </details>`;
   el.querySelectorAll(".freplies li").forEach((li, i) => li.appendChild(copyBtn(replies[i][1])));
   el.querySelector(".seen-btn").onclick = () => { seen.toggle(p.id); renderBoard(); };
+  if (current && current.kind === "day") {
+    const key = `topics:${p.id}`;
+    if ((current.checks || {})[key]) el.classList.add("seen");
+    el.querySelector(".fmeta-row").insertBefore(window.dayView.box(key), el.querySelector(".fopen"));
+  }
   return el;
 }
 
@@ -146,8 +152,8 @@ function renderBoard() {
   const board = $("board"), tabs = $("tabs");
   board.innerHTML = ""; tabs.innerHTML = "";
   const result = current && current.result;
-  $("empty").classList.toggle("hidden", !!result || (current && current.status !== "done"));
-  if (!current) { $("meta").textContent = ""; return; }
+  $("empty").classList.toggle("hidden", !!result || (current && (current.status !== "done" || current.kind === "day")));
+  if (!current) { $("meta").textContent = ""; window.dayView.hide(); return; }
 
   const s = current.stats || {};
   const c = s.claude, qg = s.query_gen;
@@ -164,11 +170,20 @@ function renderBoard() {
     c || qg ? `$${usd.toFixed(2)}` : null,
     s.reanalyzed_from ? `re-analysis of #${s.reanalyzed_from}` : null,
     s.rate_wait_s ? `waited ${mins(s.rate_wait_s)} for X limit` : null,
+    s.search_requests ? `${s.search_requests} X requests` : null,
   ].filter(Boolean).map(esc);
   const warn = [s.rate_limited ? "X rate limit: search stopped early" : null, s.claude_error ? "Claude failed on some topics, local ranking there" : null,
                 s.error ? String(s.error).slice(0, 80) : null].filter(Boolean).map((w) => `<span class="error">${esc(w)}</span>`);
   $("meta").innerHTML = bits.join(" · ") + (warn.length ? " · " + warn.join(" · ") : "");
   $("meta").title = c || qg ? `tokens in ${k(tin)} / out ${k(tout)} · scraping ${mins(s.scrape_s) || "?"} · Claude ${c ? mins(Math.round(c.duration_s)) : "?"}` : "";
+  if (current.kind === "day") {
+    if (window.dayView.render(current)) return;
+    if (!result) {
+      const st = (current.stages || {}).topics || {};
+      board.insertAdjacentHTML("beforeend", `<p class="fnone">${st.status && st.status !== "ready" ? "Topics: " + esc(st.status) + "…" : "No topic picks in this run."}</p>`);
+      return;
+    }
+  } else window.dayView.hide();
   if (!result) return;
 
   if (!result.find((t) => t.topic === activeTopic)) activeTopic = result[0] && result[0].topic;
@@ -201,7 +216,7 @@ async function loadRuns(selectId) {
   const sel = $("runSelect");
   sel.innerHTML = runs.map((r) => {
     const when = new Date(r.started_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    const topics = (r.topics || []).map((t) => t.name).join(", ");
+    const topics = r.kind === "day" ? "daily run" : (r.topics || []).map((t) => t.name).join(", ");
     const mark = r.status === "done" ? "" : r.status === "running" ? " (running)" : r.status === "stopped" ? " (stopped)" : " (failed)";
     const c = (r.stats || {}).claude;
     const tok = c ? ` · ${k(c.input_tokens + c.output_tokens)} tok` : "";
@@ -244,6 +259,11 @@ async function refresh() {
     } else $("timing").textContent = "";
     $("log").textContent = (s.log || []).join("\n");
     $("log").scrollTop = 1e9;
+    if (s.running && s.kind === "run" && s.run_id) {
+      const sig = JSON.stringify(Object.entries(s.stages || {}).map(([key, v]) => [key, v.status, v.count]));
+      if (!current || current.id !== s.run_id) { lastSig = sig; await loadRuns(s.run_id); }
+      else if (sig !== lastSig) { lastSig = sig; await loadRun(s.run_id); }
+    }
     if (wasRunning && !s.running && s.kind === "run") await loadRuns(s.run_id);
     wasRunning = s.running;
     if (window.profilePanel) await window.profilePanel.onState(s);
@@ -272,6 +292,9 @@ async function loadSettings() {
   $("lang").value = s.lang; $("perMode").value = s.per_mode; $("cands").value = s.candidates;
   $("model").value = s.model; $("headless").checked = s.headless; $("gistLang").value = s.gist_lang;
   $("pfPosts").value = s.profile_max_posts; $("pfDays").value = s.profile_max_days; $("pfReplies").value = s.profile_max_replies;
+  document.querySelectorAll("[data-stage]").forEach((el) => (el.checked = (s.stages || {})[el.dataset.stage] !== false));
+  $("trashLimit").value = s.trash_limit; $("ownHandle").value = s.own_handle || ""; $("topicExtra").checked = !!s.topic_extra_queries;
+  $("bigAccounts").value = (s.big_accounts || []).map((h) => "@" + h).join(" ");
   $("profile").value = p.text;
   $("saveMsg").textContent = p.custom ? "" : "Profile is the example: edit it to describe yourself.";
 }
@@ -291,14 +314,21 @@ async function saveSettings() {
     model: $("model").value, headless: $("headless").checked, gist_lang: $("gistLang").value.trim() || "English",
     profile_max_posts: +$("pfPosts").value || 300, profile_max_days: +$("pfDays").value || 120,
     profile_max_replies: $("pfReplies").value === "" ? 60 : +$("pfReplies").value,
+    stages: Object.fromEntries([...document.querySelectorAll("[data-stage]")].map((el) => [el.dataset.stage, el.checked])),
+    trash_limit: $("trashLimit").value === "" ? 3 : +$("trashLimit").value,
+    own_handle: $("ownHandle").value.trim().replace(/^@/, ""),
+    topic_extra_queries: $("topicExtra").checked,
+    big_accounts: $("bigAccounts").value.split(/[\s,]+/).map((x) => x.replace(/^@/, "").trim()).filter(Boolean),
   });
+  window.settingsCache = await api("/api/settings");
+  window.dayView.loadOwn();
   await post("/api/profile", { text: $("profile").value });
   $("saveMsg").textContent = "Saved.";
 }
 
 // ---- sidebar: one section at a time ----
 const VIEWS = {
-  feed: ["viewFeed", "navFeed", "columns-2", "Topics"],
+  feed: ["viewFeed", "navFeed", "columns-2", "Today"],
   profiles: ["viewProfiles", "navProfiles", "user-search", "Profiles"],
   post: ["viewPost", "navPost", "file-search", "Post"],
   settings: ["viewSettings", "settingsBtn", "sliders-horizontal", "Settings"],
@@ -331,5 +361,7 @@ $("runSelect").onchange = (e) => loadRun(e.target.value);
 $("logToggle").onclick = () => $("log").classList.toggle("hidden");
 $("logBtn").onclick = () => { logOpen = !logOpen; $("log").classList.toggle("hidden", !logOpen); refresh(); };
 
+api("/api/settings").then((x) => (window.settingsCache = x)).catch(() => {});
+window.dayView.loadOwn();
 loadRuns();
 loop();

@@ -30,6 +30,19 @@ Scrolling X to find posts worth reading or replying to eats an hour a day. Brows
 
 The feed is one quiet column. Each post shows a 1–2 sentence summary (in a language you pick) and why it is worth your time; reply picks add a **say** and an **ask** reply with a copy button. **Breakdown** folds out what is going on around the post, why it spreads (from views vs followers and bookmarks per like), what to take from it, what is unverified or hype, the full text and the numbers.
 
+## Daily run (one button)
+
+**Run** does a staged pass over X in about 30 minutes, paced like one person searching. Tabs fill in one by one, so you work on the first while the next is still being read:
+
+| Tab | What lands there |
+|---|---|
+| **News** | The biggest stories of the last 12–24 h (X Explore → News plus search), each with what happened, why it is hot and 2–3 post drafts. |
+| **Big accounts** | Fresh posts (1–3 h) of large accounts where the replies are not flooded yet, with two reply drafts. |
+| **Viral** | Posts that took off in the last 48 h, any topic, split by format, with a "can you repeat it" note, a `Hey @grok` version, your own rewrite, an opposite-view quote when the post disagrees with your profile, and a topic for an opinion post. |
+| **Trash** | Fresh small and mid-size posts for quick light replies. A daily limit in Settings, no follow-for-follow. |
+| **Topics** | Optional: your topics, as before (Reply / Read). |
+| **Checklist** | Ticks from every tab, manual items (tomorrow's posts scheduled, yesterday's went out, weekly own-profile check) and Claude's recommendations from the end-of-run summary. Boxes belong to the run: a new Run starts clean. |
+
 ## Features
 
 - **Up to 10 topics**, each with an optional X search query (`OR`, quotes, `-exclude`, `from:` …) and extra queries that catch posts the main one misses. Leave them empty and Claude writes them from the topic name and your profile.

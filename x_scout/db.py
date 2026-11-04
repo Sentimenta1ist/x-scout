@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -47,9 +48,48 @@ def conn():
         c.close()
 
 
+# columns added after the first release: (name, type); init() adds the missing ones
+MIGRATIONS = [("kind", "text"), ("stages", "text"), ("checks", "text")]
+_stage_lock = threading.Lock()  # stage results are written from the run loop and from Claude threads
+
+
 def init():
     with conn() as c:
         c.executescript(SCHEMA)
+        have = {r["name"] for r in c.execute("pragma table_info(runs)")}
+        for name, typ in MIGRATIONS:
+            if name not in have:
+                c.execute(f"alter table runs add column {name} {typ}")
+
+
+def set_kind(run_id, kind):
+    with conn() as c:
+        c.execute("update runs set kind=? where id=?", (kind, run_id))
+
+
+def update_stage(run_id, stage, **fields):
+    """Merge fields into runs.stages[stage] (json). Returns the whole stages dict."""
+    with _stage_lock, conn() as c:
+        r = c.execute("select stages from runs where id=?", (run_id,)).fetchone()
+        stages = json.loads(r["stages"]) if r and r["stages"] else {}
+        stages.setdefault(stage, {}).update(fields)
+        c.execute("update runs set stages=? where id=?", (json.dumps(stages), run_id))
+        return stages
+
+
+def set_check(run_id, key, done):
+    """Checklist / card checkbox of one run: {key: true}. Unchecked keys are removed."""
+    with _stage_lock, conn() as c:
+        r = c.execute("select checks from runs where id=?", (run_id,)).fetchone()
+        if r is None:
+            return None
+        checks = json.loads(r["checks"]) if r["checks"] else {}
+        if done:
+            checks[key] = True
+        else:
+            checks.pop(key, None)
+        c.execute("update runs set checks=? where id=?", (json.dumps(checks), run_id))
+        return checks
 
 
 def last_snapshot(post_id):
@@ -102,14 +142,14 @@ def save_candidates(run_id, candidates):
 def finish_run(run_id, status, result=None, stats=None):
     with conn() as c:
         c.execute(
-            "update runs set finished_at=?, status=?, result=?, stats=? where id=?",
+            "update runs set finished_at=?, status=?, result=coalesce(?, result), stats=? where id=?",
             (now_iso(), status, json.dumps(result) if result is not None else None, json.dumps(stats or {}), run_id),
         )
 
 
 def _run_row(r):
     d = dict(r)
-    for k in ("topics", "result", "stats", "candidates"):
+    for k in ("topics", "result", "stats", "candidates", "stages", "checks"):
         if k not in d:
             continue
         d[k] = json.loads(d[k]) if d[k] else None
@@ -118,7 +158,7 @@ def _run_row(r):
 
 def list_runs(limit=30):
     with conn() as c:
-        rows = c.execute("select id, started_at, finished_at, status, topics, stats from runs order by id desc limit ?", (limit,)).fetchall()
+        rows = c.execute("select id, started_at, finished_at, status, topics, stats, kind from runs order by id desc limit ?", (limit,)).fetchall()
         return [_run_row(dict(r)) for r in rows]
 
 

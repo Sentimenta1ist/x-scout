@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>X Scout</title>
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
   <aside class="side">
     <div class="brand">X Scout</div>
     <nav class="side-nav" aria-label="Sections">
-      <button id="navFeed" data-view="feed">Topics</button>
+      <button id="navFeed" data-view="feed">Today</button>
       <button id="navProfiles" data-view="profiles">Profiles</button>
       <button id="navPost" data-view="post">Post</button>
     </nav>
@@ -47,14 +47,15 @@
   </section>
 
   <main class="feed">
+    <nav id="stageTabs" class="ftabs stabs hidden" aria-label="Stages"></nav>
     <nav id="tabs" class="ftabs" aria-label="Topics"></nav>
     <div id="meta" class="fmeta"></div>
     <div id="board" class="fboard"></div>
     <div id="empty" class="empty hidden">
       <h2>No runs yet</h2>
       <p>1. <b>Log in to X</b> (a Chrome window opens, use your secondary account).<br>
-         2. Add topics in <b>Settings</b>.<br>
-         3. Press <b>Run</b>. Takes a few minutes: search is paced like a person.</p>
+         2. Press <b>Run</b>. About 30 minutes, paced like a person: News, Big accounts, Viral, Trash and Topics fill in one by one.<br>
+         3. Work tab by tab, tick what you did, finish with the <b>Checklist</b>. Topics are optional (Settings).</p>
     </div>
   </main>
   </div>
@@ -102,6 +103,19 @@
         <p class="hint">Name is shown in the UI. Query is what goes to X search (any X operators). Extra queries, separated by <code>;</code>, catch posts the main one misses: one more Top search each. Leave a field empty and Claude writes it on the next run.</p>
         <div id="topics"></div>
         <button id="addTopic" class="ghost small">+ topic</button>
+        <h3>Daily run</h3>
+        <p class="hint">Stages run in this order. Topics run last, only if there are topics above.</p>
+        <div class="stage-toggles">
+          <label class="row"><input type="checkbox" data-stage="news"> News</label>
+          <label class="row"><input type="checkbox" data-stage="big"> Big accounts</label>
+          <label class="row"><input type="checkbox" data-stage="viral"> Viral</label>
+          <label class="row"><input type="checkbox" data-stage="trash"> Trash</label>
+          <label class="row"><input type="checkbox" data-stage="topics"> Topics</label>
+        </div>
+        <label>Trash replies a day, at most <input id="trashLimit" type="number" min="0" max="50"></label>
+        <label>Your X handle (weekly profile reminder) <input id="ownHandle" size="16" placeholder="sentimentGod"></label>
+        <label class="row"><input id="topicExtra" type="checkbox"> topics: also run extra queries (costs rate limit)</label>
+        <label>Big accounts, empty = built-in list <textarea id="bigAccounts" rows="3" placeholder="@sama @karpathy @levelsio ..."></textarea></label>
         <h3>Scraping</h3>
         <label>Language <input id="lang" size="4" placeholder="en"></label>
         <label>Posts per search (Top / Latest) <input id="perMode" type="number" min="10" max="80"></label>
@@ -126,7 +140,8 @@
   </section>
 
   </div>
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/day.js?v=1"></script>
+  <script src="/static/app.js?v=7"></script>
   <script src="/static/profile.js?v=3"></script>
   <script src="/static/post.js?v=3"></script>
 </body>

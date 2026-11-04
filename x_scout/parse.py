@@ -342,3 +342,48 @@ def post_detail(payloads, post_id):
     if p["thread_parts"] and p["type"] in ("post", "quote"):
         p["type"] = "thread"
     return p
+
+
+# ---- Explore (News tab): trends / stories and any posts it carries ----
+
+def _walk_dicts(obj):
+    if isinstance(obj, dict):
+        yield obj
+        for v in obj.values():
+            yield from _walk_dicts(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_dicts(v)
+
+
+def _trend(d):
+    """A trend or news-story object wherever X nests it. X has shipped these as TimelineTrend (name, trend_metadata,
+    social_context) and as story-like objects; anything with a name plus trend-ish fields counts. None if not one."""
+    typename = str(d.get("__typename") or d.get("itemType") or "")
+    trendish = any(w in typename for w in ("Trend", "Story", "News")) or "trend_metadata" in d
+    name = d.get("name") or d.get("title") or _get(d, "core", "name")
+    if not trendish or not isinstance(name, str) or not name.strip():
+        return None
+    meta = d.get("trend_metadata") or {}
+    context = (_get(d, "social_context", "text") or meta.get("domain_context") or d.get("hook") or d.get("summary")
+               or _get(d, "core", "hook") or "")
+    count = meta.get("meta_description") or _get(d, "social_context", "text") or ""
+    return {"name": name.strip(), "context": str(context).strip(), "meta": str(count).strip()}
+
+
+def explore_items(payloads):
+    """Explore GraphQL payloads ([{"op", "data"}]) → {"trends": [{name, context, meta}], "posts": [post]}, deduped, in page order."""
+    trends, names, posts, ids = [], set(), [], set()
+    for pl in payloads:
+        data = pl.get("data") if isinstance(pl, dict) and "data" in pl else pl
+        for d in _walk_dicts(data):
+            t = _trend(d)
+            if t and t["name"].lower() not in names:
+                names.add(t["name"].lower())
+                trends.append(t)
+        for raw in _walk_tweets(data):
+            p = tweet_from_result(raw)
+            if p and p["id"] and p["id"] not in ids:
+                ids.add(p["id"])
+                posts.append(p)
+    return {"trends": trends, "posts": posts}

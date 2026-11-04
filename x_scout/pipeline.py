@@ -4,9 +4,9 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import analyze, browser, db, post_analysis, profile_analysis, profile_metrics, profile_store
+from . import analyze, browser, db, post_analysis, profile_analysis, profile_metrics, profile_store, stages as stg
 from .config import PROFILE_MD, ROOT, SETTINGS_JSON
-from .parse import age_minutes, finalize_timeline
+from .parse import age_minutes, explore_items, finalize_timeline
 from .scoring import project_views, score
 
 DEFAULT_SETTINGS = {
@@ -22,13 +22,20 @@ DEFAULT_SETTINGS = {
     "profile_max_days": 120,
     "profile_max_replies": 60,   # 0 = skip the replies tab
     "profile_model": "sonnet",
+    # staged daily run
+    "stages": {"news": True, "big": True, "viral": True, "trash": True, "topics": True},
+    "big_accounts": [],          # empty = stages.BIG_ACCOUNTS
+    "trash_limit": 3,            # trash replies a day; the checklist warns above it
+    "topic_extra_queries": False,  # topics stage: main + author searches only, extras cost too much rate limit
+    "search_pause": [10, 20],    # seconds between two searches of a staged run
+    "own_handle": "sentimentGod",
 }
 MAX_TOPICS = 10
 
 # live state of the current run, polled by the UI
 # kind: "run" (topic search), "profile" or "post"; one job at a time, they share Chrome and Stop
 state = {"running": False, "kind": "run", "run_id": None, "step": "", "log": [], "progress": 0.0, "eta_s": None, "started": None,
-         "handle": None, "analysis_id": None, "post_key": None, "error": None}
+         "handle": None, "analysis_id": None, "post_key": None, "error": None, "stages": {}}
 _task = None  # asyncio task of the current run, for Stop
 
 
@@ -219,6 +226,271 @@ async def reanalyze(run_id, settings):
         if errors:
             stats["claude_error"] = "; ".join(f"{k}: {v}" for k, v in errors.items())[:500]
         db.finish_run(new_id, "done", result, stats)
+        _log("done")
+    except asyncio.CancelledError:
+        _log("stopped")
+        db.finish_run(new_id, "stopped", stats={"error": "stopped"})
+    except Exception as e:
+        _log(f"error: {e!r}")
+        db.finish_run(new_id, "error", stats={"error": str(e)[:500]})
+    finally:
+        state.update(running=False, step="", progress=1.0)
+
+
+# ---- staged daily run: News → Big → Viral → Trash → Topics ----
+
+def _stage_state(run_id, stage, **fields):
+    state["stages"] = {**state.get("stages", {}), stage: {**state.get("stages", {}).get(stage, {}), **fields}}
+    db.update_stage(run_id, stage, **fields)
+
+
+def _enabled(settings):
+    on = settings.get("stages") or {}
+    out = [s for s in stg.ORDER if on.get(s, True)]
+    if "topics" in out and not settings.get("topics"):
+        out.remove("topics")
+    return out
+
+
+def analyze_stage(stage, posts, trends, settings):
+    """One claude -p for a stage → (picks, usage). Claude failing → local fallback, the tab still fills."""
+    prompt, index = stg.digest(load_profile(), posts, trends)
+    text, usage = analyze.run_claude(prompt, model=settings["model"], system=stg.system(stage, settings["gist_lang"]), raw=True)
+    _log(f"{stg.LABELS[stage]}: claude in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
+    return stg.assemble(stage, stg.parse(text), index), usage
+
+
+def _analyze_stage_job(run_id, stage, posts, trends, settings):
+    try:
+        picks, usage = analyze_stage(stage, posts, trends, settings)
+        _stage_state(run_id, stage, status="ready", picks=picks, count=len(picks), usage=usage)
+    except Exception as e:
+        if analyze._stopped.is_set():
+            raise
+        _log(f"{stg.LABELS[stage]}: claude failed, local order shown: {e}")
+        picks = stg.fallback(stage, posts)
+        _stage_state(run_id, stage, status="ready", picks=picks, count=len(picks), error=str(e)[:300])
+
+
+async def _scrape_stage(session, stage, settings, log):
+    """→ (posts, trends) for one stage. Searches that fail on 429 end the stage early with what was read."""
+    posts, trends = {}, []
+    if stage == "news":
+        try:
+            payloads = await session.explore()
+            found = explore_items(payloads)
+            trends = found["trends"][:20]
+            for p in found["posts"]:
+                posts.setdefault(p["id"], p)
+            log(f"News: Explore gave {len(trends)} trends and {len(found['posts'])} posts")
+            if not trends and not found["posts"]:
+                log("  Explore → News returned nothing readable: search only (X may have renamed it)")
+        except browser.RateLimited:
+            raise
+        except browser.NeedLogin:
+            raise
+        except Exception as e:
+            log(f"  Explore failed, search only: {e}")
+    for mode, query, target in stg.queries(stage, settings):
+        log(f"{stg.LABELS[stage]}: searching {mode} — {query}")
+        try:
+            batch, _ = await session.search(mode, query, target)
+        except browser.RateLimited:
+            if not posts and not trends:
+                raise
+            log(f"{stg.LABELS[stage]}: X rate limit (429), keeping {len(posts)} posts")
+            break
+        for p in batch:
+            posts.setdefault(p["id"], p)
+    return list(posts.values()), trends
+
+
+async def _topics_stage(session, run_id, settings, stats):
+    """The old topic search as the last stage: main + author searches (extras only if enabled), then the topic analysis."""
+    topics = settings["topics"][:MAX_TOPICS]
+    missing = [t for t in topics if not (t.get("query") or "").strip()]
+    if missing:
+        try:
+            queries, usage = await asyncio.to_thread(analyze.generate_queries, load_profile(), missing, settings["model"])
+            stats["query_gen"] = usage
+            for t in topics:
+                q = queries.get(t["name"])
+                if q and q["query"] and not (t.get("query") or "").strip():
+                    t["query"] = q["query"]
+                    t.setdefault("extra", q["extra"])
+            save_settings({**settings, "topics": topics})
+        except Exception as e:
+            _log(f"query writing failed, searching with the current queries: {e}")
+    search_topics = [{**t, "authors": list(dict.fromkeys([h.lstrip("@") for h in t.get("authors") or []] + db.good_authors(t["name"])))}
+                     for t in topics if (t.get("query") or "").strip()]
+    kinds = None if settings.get("topic_extra_queries") else ("main", "authors")
+    status = {}
+    scraped = await browser.scrape_topics(session, search_topics, per_mode=settings["per_mode"], lang=settings["lang"],
+                                          on_step=lambda i, label: state.update(step=f"Topics: {label}"), status=status, kinds=kinds)
+    candidates = {}
+    for name, posts in scraped.items():
+        score_posts(posts)
+        db.save_posts(posts)
+        candidates[name] = analyze.select_candidates(posts, limit=settings["candidates"])
+    db.save_candidates(run_id, candidates)
+    return candidates, sum(len(v) for v in scraped.values())
+
+
+def _topics_analysis(run_id, candidates, settings):
+    try:
+        result, usage, errors = analyze_candidates(candidates, settings)
+        n = sum(len(t.get("reply") or []) + len(t.get("save") or []) for t in result)
+        with db.conn() as c:
+            c.execute("update runs set result=? where id=?", (json.dumps(result), run_id))
+        _stage_state(run_id, "topics", status="ready", count=n, usage=usage, **({"error": "; ".join(errors.values())[:300]} if errors else {}))
+        return result
+    except Exception as e:
+        if analyze._stopped.is_set():
+            raise
+        _log(f"Topics: claude failed: {e}")
+        _stage_state(run_id, "topics", status="error", error=str(e)[:300])
+        return None
+
+
+def _summary(run_id, topics_result, settings):
+    src = db.get_run(run_id) or {}
+    digest = stg.summary_digest(src.get("stages") or {}, topics_result)
+    if not digest.strip():
+        return None, None
+    text, usage = analyze.run_claude(digest, model=settings["model"], system=stg.SUMMARY_SYSTEM.replace("{gist_lang}", settings["gist_lang"]), raw=True)
+    return stg.parse_summary(text), usage
+
+
+def _day_eta(settings):
+    for r in db.list_runs(10):
+        st = r.get("stats") or {}
+        if r["status"] == "done" and r.get("kind") == "day" and st.get("total_s"):
+            return st["total_s"]
+    return 30 * 60
+
+
+async def run_day(settings):
+    """One button: stages scrape one after another through one Chrome; each stage's Claude call runs while the next stage
+    is scraped, so tabs fill up in order. Stop / 429 / lost login keep the stages already analyzed."""
+    global _task
+    _task = asyncio.current_task()
+    analyze._stopped.clear()
+    order = _enabled(settings)
+    state.update(running=True, kind="run", step="opening X", log=[], progress=0.0, eta_s=_day_eta(settings), started=time.time(), stages={})
+    t0 = time.time()
+    stats = {"stages": order}
+    run_id = db.create_run(settings.get("topics") or [])
+    db.set_kind(run_id, "day")
+    state["run_id"] = run_id
+    for st in order:
+        _stage_state(run_id, st, status="waiting")
+    jobs, topics_job = [], None
+    try:
+        pause = tuple(settings.get("search_pause") or (10, 20))
+        on_wait = lambda left: state.update(step=f"waiting for X search limit reset, {int(left // 60)}m {int(left % 60):02d}s left")
+        async with browser.Session(settings["headless"], _log, on_wait, pause=pause) as session:
+            for i, st in enumerate(order):
+                state.update(progress=round(i / (len(order) + 1), 3), step=f"{stg.LABELS[st]}: searching")
+                _stage_state(run_id, st, status="scraping")
+                if st == "topics":
+                    candidates, scraped = await _topics_stage(session, run_id, settings, stats)
+                    _stage_state(run_id, st, status="analyzing", scraped=scraped)
+                    topics_job = asyncio.create_task(asyncio.to_thread(_topics_analysis, run_id, candidates, settings))
+                    continue
+                posts, trends = await _scrape_stage(session, st, settings, _log)
+                score_posts(posts)
+                db.save_posts(posts)
+                cands = stg.select(st, posts, settings)
+                _log(f"{stg.LABELS[st]}: {len(cands)} candidates of {len(posts)}" + (f", {len(trends)} trends" if trends else ""))
+                if not cands and not trends:
+                    _stage_state(run_id, st, status="ready", picks=[], count=0, scraped=len(posts))
+                    continue
+                _stage_state(run_id, st, status="analyzing", scraped=len(posts), cands=[analyze.slim(p) for p in cands], trends=trends)
+                jobs.append(asyncio.create_task(asyncio.to_thread(_analyze_stage_job, run_id, st, cands, trends, settings)))
+            stats["search_requests"] = session.budget.calls
+            stats["rate_wait_s"] = round(session.budget.waited)
+        state.update(progress=round(len(order) / (len(order) + 1), 3), step="Claude is finishing the last tabs")
+        await asyncio.gather(*jobs)
+        topics_result = await topics_job if topics_job else None
+        state.update(step="Claude is writing the summary")
+        try:
+            summary, usage = await asyncio.to_thread(_summary, run_id, topics_result, settings)
+            if summary:
+                db.update_stage(run_id, "summary", **summary, usage=usage)
+        except Exception as e:
+            if analyze._stopped.is_set():
+                raise
+            _log(f"summary failed: {e}")
+        stats["total_s"] = round(time.time() - t0)
+        db.finish_run(run_id, "done", topics_result, stats)
+        _log(f"done in {stats['total_s'] // 60}m {stats['total_s'] % 60}s")
+    except BaseException as e:
+        if isinstance(e, asyncio.CancelledError):
+            analyze.stop_claude()
+            status, msg = "stopped", "stopped"
+        elif isinstance(e, browser.NeedLogin):
+            status, msg = "error", "X asks to log in: press 'Log in to X' and retry"
+        elif isinstance(e, browser.RateLimited):
+            status, msg = "error", "X rate limit (429): stopped. Wait an hour before the next run."
+        elif isinstance(e, Exception):
+            status, msg = "error", f"error: {e!r}"
+        else:
+            raise
+        _log(msg)
+        pending = jobs + ([topics_job] if topics_job else [])
+        if status == "stopped":
+            for j in pending:
+                j.cancel()
+        elif pending:  # X stopped the scrape: stages already handed to Claude still finish
+            state.update(step="X stopped the search: Claude finishes the stages already read")
+            await asyncio.gather(*pending, return_exceptions=True)
+        for st, v in ((db.get_run(run_id) or {}).get("stages") or {}).items():
+            if isinstance(v, dict) and v.get("status") in ("waiting", "scraping", "analyzing"):
+                db.update_stage(run_id, st, status="skipped")
+        stats["total_s"] = round(time.time() - t0)
+        db.finish_run(run_id, status, None, {**stats, "error": "stopped" if status == "stopped" else msg})
+    finally:
+        state.update(running=False, step="", progress=1.0)
+
+
+async def reanalyze_day(run_id, settings):
+    """Claude again on every stage of a stored day run (stored candidates and trends, no scraping). For prompt tuning."""
+    global _task
+    _task = asyncio.current_task()
+    analyze._stopped.clear()
+    src = db.get_run(run_id)
+    state.update(running=True, kind="run", step="Claude is re-reading stored stages", log=[], progress=0.3, eta_s=120, started=time.time(), stages={})
+    new_id = db.create_run(src.get("topics") or [])
+    db.set_kind(new_id, "day")
+    state["run_id"] = new_id
+    t0 = time.time()
+    try:
+        jobs = []
+        for st, v in (src.get("stages") or {}).items():
+            if st == "summary" or not isinstance(v, dict):
+                continue
+            if st == "topics":
+                continue
+            cands = v.get("cands") or []
+            if not cands and not v.get("trends"):
+                _stage_state(new_id, st, status="ready", picks=[], count=0)
+                continue
+            for p in cands:  # slim() needs the scored block back
+                p.setdefault("scored", {"score": p.get("score", 0), "label": p.get("label", ""), "parts": p.get("parts", {})})
+            _stage_state(new_id, st, status="analyzing", cands=v.get("cands"), trends=v.get("trends"))
+            jobs.append(asyncio.to_thread(_analyze_stage_job, new_id, st, cands, v.get("trends") or [], settings))
+        topics_result = None
+        if src.get("candidates"):
+            db.save_candidates(new_id, src["candidates"])
+            _stage_state(new_id, "topics", status="analyzing")
+            jobs.append(asyncio.to_thread(_topics_analysis, new_id, src["candidates"], settings))
+        results = await asyncio.gather(*jobs)
+        if src.get("candidates"):
+            topics_result = results[-1]
+        summary, usage = await asyncio.to_thread(_summary, new_id, topics_result, settings)
+        if summary:
+            db.update_stage(new_id, "summary", **summary, usage=usage)
+        db.finish_run(new_id, "done", topics_result, {"reanalyzed_from": run_id, "total_s": round(time.time() - t0)})
         _log("done")
     except asyncio.CancelledError:
         _log("stopped")

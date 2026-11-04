@@ -106,7 +106,7 @@ async def login_check():
 @app.post("/api/run")
 async def start_run():
     _busy()
-    _spawn(pipeline.run(pipeline.load_settings()))
+    _spawn(pipeline.run_day(pipeline.load_settings()))
     return {"ok": True}
 
 
@@ -120,7 +120,11 @@ async def stop_run():
 @app.post("/api/runs/{run_id}/reanalyze")
 async def reanalyze(run_id: int):
     _busy()
-    if not (r := db.get_run(run_id)) or not r.get("candidates"):
+    r = db.get_run(run_id)
+    if r and r.get("kind") == "day":
+        _spawn(pipeline.reanalyze_day(run_id, pipeline.load_settings()))
+        return {"ok": True}
+    if not r or not r.get("candidates"):
         raise HTTPException(404, "run has no stored candidates")
     _spawn(pipeline.reanalyze(run_id, pipeline.load_settings()))
     return {"ok": True}
@@ -136,8 +140,32 @@ def run(run_id: int):
     r = db.get_run(run_id)
     if not r:
         raise HTTPException(404)
-    r["has_candidates"] = bool(r.pop("candidates", None))
+    r["has_candidates"] = bool(r.pop("candidates", None)) or r.get("kind") == "day"
+    for v in (r.get("stages") or {}).values():  # stored candidates are for Re-analyze, not for the page
+        if isinstance(v, dict):
+            v.pop("cands", None)
     return r
+
+
+@app.post("/api/runs/{run_id}/checks")
+def set_check(run_id: int, body: dict = Body(...)):
+    key = str(body.get("key") or "")[:200]
+    if not key:
+        raise HTTPException(400, "key is required")
+    checks = db.set_check(run_id, key, bool(body.get("done")))
+    if checks is None:
+        raise HTTPException(404)
+    return checks
+
+
+@app.get("/api/own")
+def own_profile():
+    """Last analysis of the own account (settings.own_handle), for the weekly checklist item."""
+    handle = (pipeline.load_settings().get("own_handle") or "").lstrip("@")
+    for h in profile_store.history():
+        if h["handle"].lower() == handle.lower():
+            return {"handle": h["handle"], "last": h["analyses"][0]["created_at"]}
+    return {"handle": handle, "last": None}
 
 
 def _handle(raw):

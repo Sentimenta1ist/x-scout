@@ -377,3 +377,31 @@ body { display: flex; min-height: 100vh; }
 .topic-row { margin-bottom: 12px; }
 .topic-row .textra, .topic-row .tauthors { grid-column: 1 / -1; font-size: 12.5px; color: var(--text-2); }
 @media (max-width: 640px) { .topic-row .textra { grid-row: 3; } .topic-row .tauthors { grid-row: 4; } }
+
+/* ---- staged daily run ---- */
+.stabs { margin-bottom: 4px; }
+.stabs .count.err { color: var(--hot); opacity: 1; }
+.stabs .dn { margin-left: 5px; font-size: 11px; color: var(--good); font-variant-numeric: tabular-nums; }
+.stabs .check-tab { margin-left: auto; }
+.sdot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--line); vertical-align: middle; }
+.sdot.scraping, .sdot.analyzing { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+.dchk { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; }
+.dchk input { margin: 0; accent-color: var(--good); cursor: pointer; }
+.dline { margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; font-size: 12.5px; color: var(--muted); }
+.dfmt { padding: 1px 8px; border-radius: 99px; background: var(--chip); color: var(--text-2); font-size: 11.5px; }
+.ftop.warn, .fnone.warn { color: var(--hot); }
+.dcard .fkind { width: 38px; }
+.dsum { margin: 6px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.55; }
+.dsum li { margin: 2px 0; }
+.clist { list-style: none; margin: 6px 0 0; padding: 0; }
+.clist li { display: flex; gap: 10px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--line-2); font-size: 14px; }
+.clist li:first-child { border-top: 0; }
+.clist li.ok .cl { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.clist li.rec .cl { color: var(--text-2); }
+.clist .cl i { font-style: normal; color: var(--muted); font-size: 12.5px; margin-left: 4px; }
+.clist .cnt { flex: none; min-width: 38px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
+.clist li.ok .cnt { color: var(--good); }
+.clist .cnt.over { color: var(--hot); }
+.stage-toggles { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 10px; }
+#bigAccounts { width: 100%; }
