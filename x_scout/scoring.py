@@ -15,6 +15,11 @@ DEFAULTS = {
     "min_views": 30,
     "max_age_min": 360,
     "weights": {"reply": 3, "repost": 2, "like": 1, "bookmark": 2},
+    # reply value, same as x-viral-radar scoring.js replyValue
+    "reply_max_age_min": 240,
+    "crowd_replies": 50,
+    "reply_min": 1000,
+    "reply_max": 200_000,
 }
 # Typical post reaches ~15% of follower count in views. Rough assumption, only used without author history.
 FOLLOWER_VIEW_RATIO = 0.15
@@ -85,3 +90,20 @@ def score(tweet, ctx=None, cfg=None):
         label = "old"
     return {"score": round(total), "label": label, "parts": {k: round(v) for k, v in parts.items()},
             "projected": round(projected), "vpm": round(vpm, 1), "er": round(er, 4)}
+
+
+def reply_value(tweet, cfg=None, accel_ratio=None):
+    """How many people will still open this thread and could see a fresh reply, 0-100. Same model as
+    x-viral-radar replyValue: X shows replies from accounts the viewer doesn't follow only inside the thread
+    (OONRetweetReplyFilter in xai-org/x-algorithm), so value = views still to come x share left after the crowd of
+    earlier replies x acceleration. tweet: {views, replies, age_min}. → {score, remaining, crowd}"""
+    cfg = {**DEFAULTS, **(cfg or {})}
+    views, age = tweet.get("views") or 0, tweet.get("age_min")
+    if age is None or age > cfg["reply_max_age_min"] or views < cfg["min_views"] or age < 2:
+        return {"score": 0, "remaining": 0, "crowd": 0.0}
+    remaining = max(project_views(views, age, cfg) - views, 0)
+    crowd = 1 / (1 + (tweet.get("replies") or 0) / cfg["crowd_replies"])
+    accel = 1.0 if accel_ratio is None else min(2.0, max(0.5, accel_ratio))
+    v = remaining * crowd * accel
+    s = 0.0 if v <= cfg["reply_min"] else clamp(math.log(v / cfg["reply_min"]) / math.log(cfg["reply_max"] / cfg["reply_min"]) * 100)
+    return {"score": round(s), "remaining": round(remaining), "crowd": round(crowd, 3)}

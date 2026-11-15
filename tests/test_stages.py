@@ -128,3 +128,10 @@ def test_day_run_fills_stages_in_order(tmp_path, monkeypatch):
     assert set(r["stages"]) == {"news", "big", "trash", "summary"}
     assert all(r["stages"][s]["status"] == "ready" for s in ("news", "big", "trash"))
     assert r["stages"]["summary"]["recs"] == ["do the news"]
+
+
+def test_select_ranks_by_reply_value_and_news_window_is_6h():
+    fresh = post(1, age=20, views=30_000, replies=10, followers=500_000)
+    peaked = post(2, age=170, views=900_000, replies=390, followers=500_000)
+    assert [p["id"] for p in stages.select("big", [peaked, fresh])] == ["1", "2"]
+    assert [p["id"] for p in stages.select("news", [post(3, age=8 * 60), post(4, age=60)])] == ["4"]

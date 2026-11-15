@@ -42,3 +42,14 @@ def test_followers_baseline_without_history():
 
 def test_lifetime_fraction():
     assert 0.63 < lifetime_fraction(150, 150) < 0.64
+
+
+def test_reply_value_prefers_fresh_quiet_threads():
+    from x_scout.scoring import reply_value
+    early = reply_value({"views": 20_000, "replies": 15, "age_min": 25})
+    peaked = reply_value({"views": 400_000, "replies": 900, "age_min": 230})
+    assert early["score"] > peaked["score"] and early["score"] > 40
+    assert reply_value({"views": 400_000, "replies": 20, "age_min": 300})["score"] == 0
+    quiet = reply_value({"views": 20_000, "replies": 5, "age_min": 40})
+    crowded = reply_value({"views": 20_000, "replies": 300, "age_min": 40})
+    assert quiet["score"] > crowded["score"]
