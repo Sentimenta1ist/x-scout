@@ -407,3 +407,7 @@ body { display: flex; min-height: 100vh; }
 .clist .cnt.over { color: var(--hot); }
 .stage-toggles { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 10px; }
 #bigAccounts { width: 100%; }
+.fpick.cold { opacity: .6; }
+.fpick.cold:hover { opacity: .9; }
+.fcold { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.fcold summary { cursor: pointer; }

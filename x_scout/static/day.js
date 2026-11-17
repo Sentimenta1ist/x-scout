@@ -2,10 +2,10 @@
 // Tabs fill up while the run goes on; every card has a "done" box, boxes belong to the run, so a new Run starts clean.
 (() => {
   const STAGES = [
-    ["news", "News", "post 3 of these today"],
-    ["big", "Big accounts", "early replies under big accounts: 2–3"],
-    ["viral", "Viral", "formats to repeat: tomorrow's 3 @grok + 3 opinions"],
-    ["trash", "Trash", "short replies for volume, stay under the limit"],
+    ["news", "News", "at most 1 own post a day; reply here only while the post is under 3h"],
+    ["big", "Big accounts", "the main source: reply while the post is under 3h and the thread is quiet"],
+    ["viral", "Viral", "formats to learn from, too old to reply under"],
+    ["trash", "Trash", "replies under smaller posts that are taking off, stay under the limit"],
     ["topics", "Topics", "what survived your topics"],
   ];
   const LABEL = Object.fromEntries(STAGES.map(([k, l]) => [k, l]));
@@ -15,6 +15,17 @@
     viral: [["grok", "grok"], ["rewrite", "yours"], ["opposite", "quote"], ["opinion", "topic"]],
     trash: [["say", "say"]],
   };
+  // the three checks before a reply (scoring.reply_fit); age is recomputed from created_at: a card cools while you read
+  const REPLY_STAGES = new Set(["big", "trash"]);
+  const ageNow = (p) => p.created_at ? (Date.now() - Date.parse(p.created_at)) / 60000 : p.age_min;
+  function coldWhy(p) {
+    if (p.trend || !p.fit) return [];
+    const why = p.fit.why.filter((w) => w !== "older than 3h");
+    const a = ageNow(p);
+    if (a == null || a > 180) why.unshift("older than 3h");
+    return why;
+  }
+  const RUN_STALE_MIN = 180;
   let active = null;
   let own = null; // {handle, last}
 
@@ -88,24 +99,29 @@
       url = `https://x.com/search?q=${encodeURIComponent(p.trend.name)}&src=trend_click`;
     } else {
       const name = (p.author.name || p.author.handle).replace(/\s*\(.*?\)\s*/g, " ").trim();
-      meta = [`<b>${esc(name)}</b>`, `@${esc(p.author.handle)}`, `${k(p.author.followers)} followers`, age(p.age_min),
-              `${k(p.views)} views`, `${k(p.replies)} replies`].join(" · ");
+      meta = [`<b>${esc(name)}</b>`, `@${esc(p.author.handle)}`, `${k(p.author.followers)} followers`, `${age(ageNow(p))} ago`,
+              `${k(p.views)} views`, `${k(p.replies)} replies`, p.fit ? `${p.fit.crowd}/10k` : ""].filter(Boolean).join(" · ");
       url = p.url;
     }
     const head = p.gist || (p.trend ? p.trend.name : (p.text || "").split("\n")[0].slice(0, 220));
     const list = drafts(p);
+    const cold = coldWhy(p);
+    const hideDrafts = cold.length && REPLY_STAGES.has(p.stage);
+    if (hideDrafts) el.classList.add("cold");
+    const draftList = list.length ? `<ul class="freplies">${list.map(([kind, t]) => `<li><span class="fkind">${kind}</span><span class="ftext">${esc(t)}</span></li>`).join("")}</ul>` : "";
     const extra = [p.format ? `<span class="dfmt">${esc(p.format)}</span>` : "", p.repeat ? `<span class="drep">${esc(p.repeat)}</span>` : ""].join("");
     el.innerHTML = `
       <div class="fmeta-row">
         <span class="fwho">${meta}</span>
         ${p.q >= 5 ? `<span class="ftop" title="Claude: do this first">top</span>` : ""}
         ${p.local ? `<span class="ftop warn" title="Claude failed: local order, no drafts">local</span>` : ""}
+        ${cold.length ? `<span class="ftop warn" title="${esc(cold.join(", "))}">${REPLY_STAGES.has(p.stage) ? "cold" : "too late to reply"}</span>` : ""}
         <a class="fopen" href="${url}" target="_blank" rel="noopener" title="Open on X">↗</a>
       </div>
       <p class="fgist">${esc(head)}</p>
       ${p.why ? `<p class="fwhy">${esc(p.why)}</p>` : ""}
       ${extra ? `<p class="dline">${extra}</p>` : ""}
-      ${list.length ? `<ul class="freplies">${list.map(([kind, t]) => `<li><span class="fkind">${kind}</span><span class="ftext">${esc(t)}</span></li>`).join("")}</ul>` : ""}
+      ${hideDrafts ? (draftList ? `<details class="fcold"><summary>${esc(cold.join(" · "))}: drafts hidden</summary>${draftList}</details>` : `<p class="fnone">${esc(cold.join(" · "))}</p>`) : draftList}
       <details class="fmore">
         <summary><span class="fnums">${p.trend ? "" : `${k(p.views)} views · ${k(p.likes)} likes · ${k(p.replies)} replies · ${k(p.bookmarks)} saves`}</span><span class="fopen-label">Breakdown</span></summary>
         ${p.context ? `<div class="fd"><span>What is going on</span><p>${esc(p.context)}</p></div>` : ""}
@@ -137,7 +153,14 @@
       if (n > limit) sec.insertAdjacentHTML("beforeend", `<p class="fnone warn">${n} trash replies today, limit ${limit}. Stop here.</p>`);
     }
     if (st.error && st.status === "ready") sec.insertAdjacentHTML("beforeend", `<p class="fnone">Claude failed here: local order, no drafts. ${esc(st.error)}</p>`);
-    picks.forEach((p) => sec.appendChild(stageCard(p)));
+    if (REPLY_STAGES.has(stage) && picks.length) {
+      const ref = run.finished_at || run.started_at;
+      const mins = ref ? (Date.now() - Date.parse(ref)) / 60000 : 0;
+      if (mins > RUN_STALE_MIN) sec.insertAdjacentHTML("beforeend", `<p class="fnone warn">This run is ${age(mins)} old: these posts have cooled. Press Run for fresh ones.</p>`);
+    }
+    // cold cards sink to the bottom, Claude's order stays within each group
+    const order = REPLY_STAGES.has(stage) ? [...picks].sort((a, b) => (coldWhy(a).length > 0) - (coldWhy(b).length > 0)) : picks;
+    order.forEach((p) => sec.appendChild(stageCard(p)));
     board.appendChild(sec);
   }
 
@@ -154,12 +177,12 @@
     const st = run.stages || {};
     const limit = (window.settingsCache || {}).trash_limit || 3;
     const out = [];
-    if (st.news) out.push({ label: "3 posts on hot news, posted today", have: doneIn("news").length, need: 3, who: names("news") });
-    out.push({ label: "6 posts for tomorrow in the X scheduler (3 @grok + 3 opinions)", key: "m:plan",
-               note: st.viral ? `${doneIn("viral").length} taken from Viral` : "" });
-    if (st.big) out.push({ label: "2–3 replies under big accounts", have: doneIn("big").length, need: 2, who: names("big") });
+    const replies = ["big", "trash", "news"].reduce((n, s) => n + doneIn(s).length, 0);
+    out.push({ label: "Replies in sessions of 8–10, each under a post < 3h with a quiet thread", have: replies, need: 8 });
+    if (st.big) out.push({ label: "From Big accounts", have: doneIn("big").length, need: 5, who: names("big") });
     if (st.trash) out.push({ label: `Trash replies, up to ${limit}`, have: doneIn("trash").length, need: Math.min(2, limit), max: limit, who: names("trash") });
-    out.push({ label: "Yesterday's scheduled posts went out", key: "m:yesterday" });
+    out.push({ label: "At most 1 own post today (quote only on a big-event day)", key: "m:post" });
+    out.push({ label: "Stop rule: two days in a row with a median under 60 views per reply → back to 20–25 a day", key: "m:stop" });
     if (own && own.handle) {
       const days = own.last ? Math.floor((Date.now() - new Date(own.last)) / 864e5) : null;
       if (days == null || days >= 7) out.push({ label: `Weekly: analyze @${own.handle} in Profiles`, key: "m:profile", note: days == null ? "never analyzed" : `last ${days} days ago` });

@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import config
 from .parse import compact_text
+from .scoring import crowd, crowd_factor
 
 SYSTEM = """You are a strict curator of X (Twitter) posts for one reader. Input: reader profile, then posts of one topic.
 Post line: n|author|followers|age|views|likes|replies|reposts|bookmarks|reach|bm|score|text
@@ -43,7 +44,7 @@ ASK <R only: a question he is really curious about, not yes/no>
 q = how much the pick is worth to him: 5 would send it to a friend or a perfect reply spot; 4 clearly worth his time; 3 fine but forgettable; 1-2 weak. Only 4-5 are shown, so do not write blocks for posts below 4.
 For R, q is the value of replying there (reach, a fresh thread, his angle, potential clients reading), not the depth of the post. For S, q is substance. Judge each post on its own: no quota, neither low nor high.
 GIST, CONTEXT, WHY, SPREAD, TAKE, DOUBT are always in {gist_lang}, also when the post is in another language; plain words, no filler; keep handles, names and terms as is.
-SAY and ASK in the language of the post, how a person actually types on X: casual, under 90 characters, lowercase is fine, fragments are fine,
+SAY and ASK in the language of the post, how a person actually types on X: casual, 30-90 characters, lowercase is fine, fragments are fine,
 words a non-engineer gets, no praise, no "great post", no links, no pitch, no jargon. The profile's stories are rare: most replies use none,
 each story at most once in the whole answer, and only when the post is directly about it."""
 
@@ -231,7 +232,7 @@ _FIELD = re.compile(r"^(GIST|CONTEXT|WHY|SPREAD|TAKE|DOUBT|SAY|ASK|ANGLE)\b\s*[:
 _COL = {"R": "reply", "S": "save"}
 FIELDS = ("gist", "context", "why", "spread", "take", "doubt", "say", "ask")
 MAX_PER_COLUMN = 6
-REPLY_MAX_AGE_H = 24
+REPLY_MAX_AGE_H = 3        # own data 2026-11: topic replies came 3.3 h late on average and got a median of 71 views
 MIN_Q = 4                 # weaker picks are never shown: an empty column beats a filler post
 REPLY_MIN_FOLLOWERS = 1000
 REPLY_MIN_VIEWS = 1000
@@ -273,8 +274,8 @@ def parse_picks(text):
 
 
 def has_reply_reach(p):
-    """A reply is worth writing only where people will see it."""
-    if p["author"]["followers"] < REPLY_MIN_FOLLOWERS:
+    """A reply is worth writing only where people will see it: a big enough post with a thread that is not crowded."""
+    if p["author"]["followers"] < REPLY_MIN_FOLLOWERS or crowd_factor(p) == 0 or crowd(p) >= 10:
         return False
     return (p.get("views") or 0) >= REPLY_MIN_VIEWS or (p["scored"].get("projected") or 0) >= REPLY_MIN_PROJECTED
 

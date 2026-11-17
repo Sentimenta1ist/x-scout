@@ -168,6 +168,12 @@ def get_run(run_id):
         return _run_row(r) if r else None
 
 
+def runs_with_picks(limit=200):
+    """id, stages and result of recent runs: which post was picked in which stage (Profiles → Replies)."""
+    with conn() as c:
+        return [dict(r) for r in c.execute("select id, stages, result from runs order by id desc limit ?", (limit,)).fetchall()]
+
+
 def latest_run_id():
     with conn() as c:
         r = c.execute("select id from runs where status='done' order by id desc limit 1").fetchone()

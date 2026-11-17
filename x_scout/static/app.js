@@ -103,7 +103,7 @@ function card(p) {
 }
 
 // ---- topic feed: one quiet column, the breakdown folds out ----
-const SECTIONS = [["reply", "Reply", "fresh posts with reach where you have something to add"],
+const SECTIONS = [["reply", "Reply", "posts under 3h with a quiet thread; older ones turn cold"],
                   ["save", "Read", "worth reading or saving"]];
 const DETAILS = [["context", "What is going on"], ["spread", "Why it spreads"], ["take", "What to take"], ["doubt", "Careful"]];
 
@@ -118,9 +118,13 @@ function pick(p, col) {
   const el = document.createElement("article");
   el.className = "fpick" + (seen.has(p.id) ? " seen" : "");
   const name = (p.author.name || p.author.handle).replace(/\s*\(.*?\)\s*/g, " ").trim();
-  const meta = [`<b>${esc(name)}</b>`, `@${esc(p.author.handle)}`, `${k(p.author.followers)} followers`, age(p.age_min)].join(" · ");
+  const mins = p.created_at ? (Date.now() - Date.parse(p.created_at)) / 60000 : p.age_min;
+  const cold = col === "reply" && mins > 180;  // replies after 3 h got a median of 108 views, after 8 h 71 (own data 2026-11)
+  if (cold) el.classList.add("cold");
+  const meta = [`<b>${esc(name)}</b>`, `@${esc(p.author.handle)}`, `${k(p.author.followers)} followers`, `${age(mins)} ago`].join(" · ")
+    + (cold ? ` · <span class="ftop warn">cold</span>` : "");
   const headline = p.gist || (p.text || "").split("\n")[0].slice(0, 220);
-  const replies = col === "reply" ? [["say", p.say || p.angle], ["ask", p.ask]].filter(([, t]) => t) : [];
+  const replies = col === "reply" && !cold ? [["say", p.say || p.angle], ["ask", p.ask]].filter(([, t]) => t) : [];
   const details = DETAILS.filter(([key]) => p[key]).map(([key, label]) => `<div class="fd ${key}"><span>${label}</span><p>${esc(p[key])}</p></div>`).join("");
   const parts = Object.entries(p.parts || {}).map(([a, b]) => `${a} ${b}`).join(" · ");
   el.innerHTML = `

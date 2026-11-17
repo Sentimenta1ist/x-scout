@@ -197,6 +197,30 @@ def profile_analysis(handle: str, analysis_id: str):
         raise HTTPException(404, "no such analysis")
 
 
+@app.get("/api/profiles/{handle}/analyses/{analysis_id}/replies")
+def profile_replies(handle: str, analysis_id: str):
+    handle = _handle(handle)
+    try:
+        return pipeline.reply_report_for(handle, profile_store.load_analysis(handle, analysis_id))
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "no such analysis")
+
+
+@app.post("/api/profiles/{handle}/analytics")
+def profile_analytics(handle: str, body: dict = Body(...)):
+    """One X Analytics CSV as text (the page reads the file): {name, text}."""
+    handle = _handle(handle)
+    text = str(body.get("text") or "")
+    if len(text) > 5_000_000:
+        raise HTTPException(413, "file too large")
+    from .reply_report import parse_analytics
+    try:
+        kind, data = parse_analytics(text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"name": profile_store.save_analytics(handle, body.get("name"), text), "kind": kind, "rows": len(data)}
+
+
 @app.post("/api/profiles/{handle}/analyses/{analysis_id}/reanalyze")
 async def profile_reanalyze(handle: str, analysis_id: str):
     _busy()

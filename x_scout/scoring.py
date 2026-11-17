@@ -15,9 +15,14 @@ DEFAULTS = {
     "min_views": 30,
     "max_age_min": 360,
     "weights": {"reply": 3, "repost": 2, "like": 1, "bookmark": 2},
-    # reply value, same as x-viral-radar scoring.js replyValue
-    "reply_max_age_min": 240,
-    "crowd_replies": 50,
+    # reply value, same as x-viral-radar scoring.js replyValue.
+    # Own data 2026-11-04..16 (249 replies): median views 252 under posts younger than 1 h, 177 at 1-3 h, 108 at 3-8 h,
+    # 71 after 8 h; 482 at < 3 replies per 10k post views, 92 at 10+; every reply under a post with 2000+ replies < 30 views.
+    "reply_max_age_min": 180,
+    "crowd_per_10k": 5,       # replies per 10k views where the crowd factor halves
+    "crowd_max_replies": 2000,
+    "fit_min_views": 50_000,  # the post should end up at least this big (projected views)
+    "fit_max_crowd": 10,      # replies per 10k views
     "reply_min": 1000,
     "reply_max": 200_000,
 }
@@ -92,6 +97,37 @@ def score(tweet, ctx=None, cfg=None):
             "projected": round(projected), "vpm": round(vpm, 1), "er": round(er, 4)}
 
 
+def crowd(tweet):
+    """Replies per 10k views. Views are floored at 5000: on a young post a handful of replies says nothing yet."""
+    return (tweet.get("replies") or 0) / max(tweet.get("views") or 0, 5000) * 10_000
+
+
+def crowd_factor(tweet, cfg=DEFAULTS):
+    """Share of attention left for one more reply: what matters is replies per viewer, not the raw count."""
+    if (tweet.get("replies") or 0) >= cfg["crowd_max_replies"]:
+        return 0.0
+    return 1 / (1 + crowd(tweet) / cfg["crowd_per_10k"])
+
+
+def reply_fit(tweet, cfg=None):
+    """The three checks before a reply (own data, see DEFAULTS): post under 3 h, thread not crowded, post heading to 50k+.
+    → {"ok", "why": [failed checks], "crowd", "projected"}. age_min is the age now, so the caller passes a fresh one."""
+    cfg = {**DEFAULTS, **(cfg or {})}
+    views, age = tweet.get("views") or 0, tweet.get("age_min")
+    projected = project_views(views, age, cfg) if age is not None and age >= 2 else views
+    c = crowd(tweet)
+    why = []
+    if age is None or age > cfg["reply_max_age_min"]:
+        why.append("older than 3h")
+    if (tweet.get("replies") or 0) >= cfg["crowd_max_replies"]:
+        why.append("2k+ replies")
+    elif c >= cfg["fit_max_crowd"]:
+        why.append("crowded thread")
+    if projected < cfg["fit_min_views"]:
+        why.append("won't reach 50k")
+    return {"ok": not why, "why": why, "crowd": round(c, 1), "projected": round(projected)}
+
+
 def reply_value(tweet, cfg=None, accel_ratio=None):
     """How many people will still open this thread and could see a fresh reply, 0-100. Same model as
     x-viral-radar replyValue: X shows replies from accounts the viewer doesn't follow only inside the thread
@@ -102,7 +138,7 @@ def reply_value(tweet, cfg=None, accel_ratio=None):
     if age is None or age > cfg["reply_max_age_min"] or views < cfg["min_views"] or age < 2:
         return {"score": 0, "remaining": 0, "crowd": 0.0}
     remaining = max(project_views(views, age, cfg) - views, 0)
-    crowd = 1 / (1 + (tweet.get("replies") or 0) / cfg["crowd_replies"])
+    crowd = crowd_factor(tweet, cfg)
     accel = 1.0 if accel_ratio is None else min(2.0, max(0.5, accel_ratio))
     v = remaining * crowd * accel
     s = 0.0 if v <= cfg["reply_min"] else clamp(math.log(v / cfg["reply_min"]) / math.log(cfg["reply_max"] / cfg["reply_min"]) * 100)

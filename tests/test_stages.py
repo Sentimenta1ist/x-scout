@@ -132,6 +132,27 @@ def test_day_run_fills_stages_in_order(tmp_path, monkeypatch):
 
 def test_select_ranks_by_reply_value_and_news_window_is_6h():
     fresh = post(1, age=20, views=30_000, replies=10, followers=500_000)
-    peaked = post(2, age=170, views=900_000, replies=390, followers=500_000)
-    assert [p["id"] for p in stages.select("big", [peaked, fresh])] == ["1", "2"]
+    peaked = post(2, age=170, views=900_000, replies=1800, followers=500_000)  # 20 replies per 10k views: drowned
+    assert [p["id"] for p in stages.select("big", [peaked, fresh])] == ["1"]  # crowded threads never reach Claude
     assert [p["id"] for p in stages.select("news", [post(3, age=8 * 60), post(4, age=60)])] == ["4"]
+
+
+def test_reply_fit_and_crowd_per_view():
+    from x_scout.scoring import reply_fit, reply_value
+    fresh = {"views": 40_000, "replies": 8, "age_min": 40}
+    assert reply_fit(fresh)["ok"]
+    assert reply_fit({**fresh, "age_min": 200})["why"] == ["older than 3h"]
+    assert "crowded thread" in reply_fit({**fresh, "replies": 80})["why"]
+    assert "2k+ replies" in reply_fit({"views": 5_000_000, "replies": 2500, "age_min": 60})["why"]
+    assert "won't reach 50k" in reply_fit({"views": 900, "replies": 0, "age_min": 100})["why"]
+    # same raw reply count, ten times the audience: the big post is the quieter thread
+    assert reply_value({"views": 400_000, "replies": 100, "age_min": 60})["crowd"] > reply_value({"views": 40_000, "replies": 100, "age_min": 60})["crowd"]
+    assert reply_value({"views": 5_000_000, "replies": 2500, "age_min": 60})["score"] == 0
+
+
+def test_trash_needs_a_post_heading_somewhere_and_cards_carry_fit():
+    small = post(1, age=60, views=900, replies=1, followers=5000)
+    rising = post(2, age=30, views=6000, replies=2, followers=50_000)
+    assert [p["id"] for p in stages.select("trash", [small, rising])] == ["2"]
+    cards = stages.assemble("big", [{"n": "1", "q": 4, "take": [], "say": ["x"]}], {"1": rising})
+    assert cards[0]["fit"]["ok"] is False and cards[0]["fit"]["why"] == ["won't reach 50k"]

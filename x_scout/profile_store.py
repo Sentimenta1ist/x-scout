@@ -54,6 +54,36 @@ def load_scrape(handle, scrape_id):
     return json.loads((_dir(handle) / "scrapes" / f"{_check_id(scrape_id)}.json").read_text())
 
 
+def load_responses(handle, scrape_id):
+    path = _dir(handle) / "scrapes" / f"{_check_id(scrape_id)}.responses.json.gz"
+    if not path.exists():
+        return []
+    with gzip.open(path, "rt") as f:
+        return json.load(f)
+
+
+_CSV_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def save_analytics(handle, name, text):
+    """An X Analytics CSV export, kept as is under analytics/; the same file name overwrites."""
+    base = _CSV_NAME.sub("_", (name or "export.csv").rsplit("/", 1)[-1]).strip("._")[:80] or "export"
+    if not base.lower().endswith(".csv"):
+        base += ".csv"
+    path = _dir(handle) / "analytics" / base
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return base
+
+
+def analytics_files(handle):
+    """[(name, text)] oldest first, so a newer export of the same days wins."""
+    d = _dir(handle) / "analytics"
+    if not d.exists():
+        return []
+    return [(f.name, f.read_text()) for f in sorted(d.glob("*.csv"), key=lambda f: f.stat().st_mtime)]
+
+
 def save_analysis(handle, analysis):
     _write(_dir(handle) / "analyses" / f"{_check_id(analysis['id'])}.json", analysis)
 

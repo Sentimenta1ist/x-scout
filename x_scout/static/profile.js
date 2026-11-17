@@ -1,9 +1,10 @@
 // Profile analysis section. Uses helpers from app.js: $, api, post, k, esc, icon, card, richText, act.
 (() => {
-  const TABS = [["overview", "Overview"], ["repeat", "Repeat for me"], ["viral", "Viral posts"], ["growth", "Growth"], ["details", "Details"]];
+  const TABS = [["overview", "Overview"], ["repeat", "Repeat for me"], ["viral", "Viral posts"], ["growth", "Growth"], ["replies", "Replies"], ["details", "Details"]];
   const COLUMNS = [["created_at", "Date"], ["type", "Type"], ["media_type", "Media"], ["views", "Views"], ["likes", "Likes"], ["replies", "Replies"],
     ["reposts", "Reposts"], ["quotes", "Quotes"], ["bookmarks", "Saves"], ["er", "ER"], ["ratio", "× median"], ["text", "Text"]];
   const STATUS = { stopped: "Stopped: partial data", rate_limited: "X rate limit: partial data", need_login: "Logged out: partial data" };
+  let replyData = null;  // /replies for the open analysis, loaded with it
   let data = null, tab = "overview", wasJob = false, sort = { key: "created_at", dir: -1 }, showAllViral = false;
   const opened = new Set();  // Details sections stay open across re-renders
 
@@ -239,7 +240,47 @@
     URL.revokeObjectURL(a.href);
   }
 
-  const RENDER = { overview, growth, viral, repeat, details };
+  // ---- replies: what each reply sits under, which x-scout stage the post came from, X Analytics joined by id ----
+  function replies() {
+    const r = replyData, s = r && r.summary;
+    const upload = `<div class="pf-compare"><label class="link" for="pfCsv">Upload X Analytics CSV</label><input id="pfCsv" type="file" accept=".csv,text/csv" multiple class="hidden">
+      <span class="hint">${r && r.analytics.length ? `${r.analytics.map((f) => `${esc(f.name)} (${f.kind}, ${f.rows})`).join(", ")} · ${r.matched} replies matched` : "account_overview_analytics.csv and account_analytics_content_*.csv from analytics.x.com"}</span></div>`;
+    if (!r) return `<div class="none">Loading…</div>`;
+    if (!s) return upload + `<div class="none">No replies with a known post in this scrape. Older scrapes have no raw responses: analyze the account again.</div>`;
+    const pv = s.fit.some((g) => g.profile_visits != null);
+    const table = (title, groups, hint) => section(title, `<table class="pf-table"><thead><tr><th></th><th class="n">Replies</th><th class="n">Median views</th><th class="n">1k+</th><th class="n">Under 50</th>${pv ? `<th class="n">Profile visits</th>` : ""}</tr></thead><tbody>${groups.map((g) =>
+      `<tr><td>${esc(g.label)}</td><td class="n">${g.n}</td><td class="n">${num(g.median_views)}</td><td class="n">${pct(g.share_1k)}</td><td class="n">${pct(g.share_under_50)}</td>${pv ? `<td class="n">${g.profile_visits ?? ""}</td>` : ""}</tr>`).join("")}</tbody></table>`, hint);
+    const reasons = s.fail_reasons.map(([w, n]) => `${esc(w)} ×${n}`).join(", ");
+    const daily = s.daily.length ? section("By day", `<table class="pf-table"><thead><tr><th>Day</th><th class="n">Replies</th><th class="n">Passed</th><th class="n">Median views</th><th class="n">Impressions</th><th class="n">Profile visits</th><th class="n">Follows</th></tr></thead><tbody>${s.daily.map((d) =>
+      `<tr><td>${esc(d.date.slice(5))}</td><td class="n">${d.replies}</td><td class="n">${d.fit}</td><td class="n">${d.median_views ?? ""}</td><td class="n">${d.impressions != null ? num(d.impressions) : ""}</td><td class="n">${d.profile_visits ?? ""}</td><td class="n">${d.follows != null ? `${d.follows}${d.unfollows ? ` −${d.unfollows}` : ""}` : ""}</td></tr>`).join("")}</tbody></table>`,
+      "Stop rule: two days in a row with a median under 60 views per reply means too many replies. Follows tend to land the day after a strong evening.") : "";
+    const worst = s.worst.length ? section("Wasted replies", `<ul class="pf-list">${s.worst.map((w) => `<li><a class="inl" href="${esc(w.url)}" target="_blank" rel="noopener">@${esc(w.to || "?")} · ${num(w.views)} views</a> <span class="hint">${esc(w.why.join(", "))}</span></li>`).join("")}</ul>`) : "";
+    return upload
+      + table("Three checks before a reply", s.fit, `Post under 3h, under 10 replies per 10k views and under 2000 replies, post ends up at 50k+. Failed: ${reasons || "none"}. Post size is its views now, not at reply time.`)
+      + table("Where the post came from", s.stages, "x-scout stage that showed the post; manual = found in the feed or a screenshot")
+      + table("Reply sent after the post", s.delay)
+      + table("Final size of the post", s.parent_views)
+      + table("Replies per 10k views of the post", s.crowd)
+      + daily + worst;
+  }
+
+  async function loadReplies() {
+    replyData = null;
+    try { replyData = await api(`/api/profiles/${encodeURIComponent(data.profile.handle)}/analyses/${encodeURIComponent(data.id)}/replies`); }
+    catch { replyData = { summary: null, analytics: [], matched: 0 }; }
+    if (tab === "replies") render();
+  }
+
+  function wireUpload() {
+    const inp = $("pfCsv");
+    if (!inp) return;
+    inp.onchange = act(async () => {
+      for (const f of inp.files) await post(`/api/profiles/${encodeURIComponent(data.profile.handle)}/analytics`, { name: f.name, text: await f.text() });
+      await loadReplies();
+    });
+  }
+
+  const RENDER = { overview, growth, viral, repeat, replies, details };
 
   function render() {
     const meta = $("pfMeta"), tabs = $("pfTabs"), body = $("pfBody");
@@ -264,6 +305,7 @@
     }
     body.innerHTML = RENDER[tab]();
     if (tab === "growth") renderDelta();
+    if (tab === "replies") wireUpload();
     if ($("pfMoreRepeat")) $("pfMoreRepeat").onclick = () => { tab = "repeat"; render(); };
   }
 
@@ -284,6 +326,7 @@
     showAllViral = false;
     $("pfHandle").value = data.profile.handle;
     render();
+    loadReplies();
   }
 
   window.profilePanel = {

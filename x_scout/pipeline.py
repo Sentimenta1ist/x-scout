@@ -4,7 +4,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import analyze, browser, db, post_analysis, profile_analysis, profile_metrics, profile_store, stages as stg
+from . import analyze, browser, db, post_analysis, profile_analysis, profile_metrics, profile_store, reply_report, stages as stg
 from .config import PROFILE_MD, ROOT, SETTINGS_JSON
 from .parse import age_minutes, explore_items, finalize_timeline
 from .scoring import project_views, score
@@ -516,6 +516,18 @@ def _build_analysis(handle, scrape_id, scrape, settings, status):
     return {"id": profile_store.new_id(), "scrape_id": scrape_id, "created_at": db.now_iso(), "status": status,
             "profile": scrape["profile"], "metrics": metrics, "posts": rows, "report": None,
             "stats": {"posts": len(rows), "scrape_s": scrape.get("scrape_s")}}
+
+
+def reply_report_for(handle, analysis):
+    """Profiles → Replies: own replies against the posts they answer (from the stored raw responses), the x-scout stage of
+    each post and any X Analytics CSVs uploaded for this account. Computed on read, so a new CSV shows up at once."""
+    scrape = profile_store.load_scrape(handle, analysis["scrape_id"])
+    par = reply_report.parents(profile_store.load_responses(handle, analysis["scrape_id"]))
+    stats = reply_report.merge_analytics(profile_store.analytics_files(handle))
+    stage_of = reply_report.stage_map(reply_report.load_runs_json(db.runs_with_picks()))
+    rs = reply_report.rows(scrape["posts"], par, stage_of, stats["content"])
+    return {"summary": reply_report.summarize(rs, stats["overview"]), "analytics": stats["files"],
+            "matched": sum(1 for r in rs if r["profile_visits"] is not None)}
 
 
 def _claude_report(analysis, settings):

@@ -16,7 +16,7 @@ R #9 2 | g | wrong topic index | x
 
 def _post(pid, views=5000, age=60, score=50, label="normal"):
     return {"id": pid, "url": "u", "text": f"post number {pid} with some text", "author": {"handle": "a", "name": "A", "followers": 1000},
-            "views": views, "likes": 50, "replies": 5, "reposts": 5, "bookmarks": 5, "age_min": age,
+            "views": views, "likes": 50, "replies": 2, "reposts": 5, "bookmarks": 5, "age_min": age,
             "scored": {"score": score, "label": label, "parts": {}}}
 
 
