@@ -19,8 +19,8 @@
   const REPLY_STAGES = new Set(["big", "trash"]);
   const ageNow = (p) => p.created_at ? (Date.now() - Date.parse(p.created_at)) / 60000 : p.age_min;
   function coldWhy(p) {
-    if (p.trend || !p.fit) return [];
-    const why = p.fit.why.filter((w) => w !== "older than 3h");
+    if (p.trend) return [];
+    const why = p.fit ? p.fit.why.filter((w) => w !== "older than 3h") : [];  // runs before 2026-11-17 have no fit: age only
     const a = ageNow(p);
     if (a == null || a > 180) why.unshift("older than 3h");
     return why;
