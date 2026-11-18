@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "x-scout typer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Types an x-scout reply draft into X's reply box key by key. You read it and press Reply yourself.",
   "host_permissions": ["http://localhost:8765/*"],
   "background": { "service_worker": "background.js" },

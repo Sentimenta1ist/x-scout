@@ -33,10 +33,6 @@
     return null;
   }
 
-  function key(el, type, ch) {
-    el.dispatchEvent(new KeyboardEvent(type, { key: ch === "\n" ? "Enter" : ch, bubbles: true, cancelable: true }));
-  }
-
   async function run() {
     const r = await api(`/api/type/next/${id}`);
     if (!r.ok) return; // nothing queued for this post: a normal visit
@@ -68,9 +64,9 @@
       if (!box.contains(document.activeElement) && document.activeElement !== box) {
         return report("error", { error: "focus left the reply box, typing stopped" });
       }
-      key(box, "keydown", ch);
+      // one character per input event, like typing. No synthetic keydown/keyup: X's Draft.js editor handles those
+      // itself and duplicates the text ("twtotwt...", checked 2026-11-18)
       document.execCommand(ch === "\n" ? "insertLineBreak" : "insertText", false, ch);
-      key(box, "keyup", ch);
       await sleep(delay(ch));
     }
     report("waiting", { typed: box.innerText.trim() });
