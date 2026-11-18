@@ -227,3 +227,13 @@ def sent_ids():
     """Posts we already replied to."""
     with conn() as c:
         return {r["target_id"] for r in c.execute("select target_id from sent where status in ('sent','already')")}
+
+
+def recent_sent(limit=25, edits=10):
+    """→ (last sent texts, last [(draft, sent)] where he changed the draft), newest first."""
+    with conn() as c:
+        rows = c.execute("select draft, sent_text from sent where status='sent' and sent_text is not null order by ts desc limit ?",
+                         (limit,)).fetchall()
+    sent = [r["sent_text"] for r in rows]
+    changed = [(r["draft"], r["sent_text"]) for r in rows if r["draft"] and r["draft"].strip() != r["sent_text"].strip()]
+    return sent, changed[:edits]

@@ -254,7 +254,8 @@ def _enabled(settings):
 
 def analyze_stage(stage, posts, trends, settings):
     """One claude -p for a stage → (picks, usage). Claude failing → local fallback, the tab still fills."""
-    prompt, index = stg.digest(load_profile(), posts, trends)
+    history = stg.history_lines(*db.recent_sent()) if stage in stg.REPLY_STAGES else None
+    prompt, index = stg.digest(load_profile(), posts, trends, history)
     text, usage = analyze.run_claude(prompt, model=settings["model"], system=stg.system(stage, settings["gist_lang"]), raw=True)
     _log(f"{stg.LABELS[stage]}: claude in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
     return stg.assemble(stage, stg.parse(text), index), usage

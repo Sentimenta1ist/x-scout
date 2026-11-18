@@ -10,13 +10,13 @@
   ];
   const LABEL = Object.fromEntries(STAGES.map(([k, l]) => [k, l]));
   const FIELDS = {
-    news: [["take", "post"]],
+    news: [["say", "say"], ["take", "post"]],
     big: [["say", "say"], ["ask", "ask"]],
     viral: [["grok", "grok"], ["rewrite", "yours"], ["opposite", "quote"], ["opinion", "topic"]],
     trash: [["say", "say"]],
   };
   // the three checks before a reply (scoring.reply_fit); age is recomputed from created_at: a card cools while you read
-  const REPLY_STAGES = new Set(["big", "trash"]);
+  const REPLY_STAGES = new Set(["news", "big", "trash"]);
   const ageNow = (p) => p.created_at ? (Date.now() - Date.parse(p.created_at)) / 60000 : p.age_min;
   function coldWhy(p) {
     if (p.trend) return [];
@@ -108,7 +108,9 @@
     const cold = coldWhy(p);
     const hideDrafts = cold.length && REPLY_STAGES.has(p.stage);
     if (hideDrafts) el.classList.add("cold");
-    const draftList = list.length ? `<ul class="freplies">${list.map(([kind, t]) => `<li><span class="fkind">${kind}</span><span class="ftext">${esc(t)}</span></li>`).join("")}</ul>` : "";
+    const isReply = ([kind]) => kind === "say" || kind === "ask";
+    const ul = (l) => l.length ? `<ul class="freplies">${l.map(([kind, t]) => `<li><span class="fkind">${kind}</span><span class="ftext">${esc(t)}</span></li>`).join("")}</ul>` : "";
+    const draftList = ul(list);
     const extra = [p.format ? `<span class="dfmt">${esc(p.format)}</span>` : "", p.repeat ? `<span class="drep">${esc(p.repeat)}</span>` : ""].join("");
     el.innerHTML = `
       <div class="fmeta-row">
@@ -121,16 +123,17 @@
       <p class="fgist">${esc(head)}</p>
       ${p.why ? `<p class="fwhy">${esc(p.why)}</p>` : ""}
       ${extra ? `<p class="dline">${extra}</p>` : ""}
-      ${hideDrafts ? (draftList ? `<details class="fcold"><summary>${esc(cold.join(" · "))}: drafts hidden</summary>${draftList}</details>` : `<p class="fnone">${esc(cold.join(" · "))}</p>`) : draftList}
+      ${hideDrafts ? (list.some(isReply) ? `<details class="fcold"><summary>${esc(cold.join(" · "))}: replies hidden</summary>${ul(list.filter(isReply))}</details>` : `<p class="fnone">${esc(cold.join(" · "))}</p>`) + ul(list.filter((d) => !isReply(d))) : draftList}
       <details class="fmore">
         <summary><span class="fnums">${p.trend ? "" : `${k(p.views)} views · ${k(p.likes)} likes · ${k(p.replies)} replies · ${k(p.bookmarks)} saves`}</span><span class="fopen-label">Breakdown</span></summary>
         ${p.context ? `<div class="fd"><span>What is going on</span><p>${esc(p.context)}</p></div>` : ""}
         ${p.trend ? `<div class="fd"><span>Trend</span><p>${esc(p.trend.name)}${p.trend.context ? ` — ${esc(p.trend.context)}` : ""}</p></div>`
                   : `<div class="fd"><span>Post</span><p class="ftext-full">${richText(p.text)}</p>${p.quoted ? `<p class="fquoted">${richText(p.quoted.slice(0, 600))}</p>` : ""}</div>`}
       </details>`;
+    const shown = hideDrafts ? [...list.filter(isReply), ...list.filter((d) => !isReply(d))] : list;
     el.querySelectorAll(".freplies li").forEach((li, i) => {
-      li.appendChild(copyBtn(list[i][1]));
-      if (REPLY_STAGES.has(p.stage) && !p.trend && (list[i][0] === "say" || list[i][0] === "ask")) li.appendChild(typeBtn(p, li));
+      li.appendChild(copyBtn(shown[i][1]));
+      if (REPLY_STAGES.has(p.stage) && !p.trend && isReply(shown[i])) li.appendChild(typeBtn(p, li));
     });
     el.querySelector(".fmeta-row").insertBefore(box(key), el.querySelector(".fopen"));
     return el;

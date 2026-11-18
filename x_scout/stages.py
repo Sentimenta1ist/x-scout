@@ -118,6 +118,37 @@ VOICE = """The reader grows his X account by virality and volume (strategy since
 fear that AI replaces jobs, "what do I do next", sharp criticism of hype, questions that make people answer. AI, agents and
 dev life are one theme among others, not a niche. Virality first, usefulness second. Never "let's connect" or follow-for-follow."""
 
+# the owner's /x-reply rules (brain: .claude/commands/x-reply.md, from his own reply log): drafts go straight to the
+# "type" button, so they must already be in his voice
+REPLY_RULES = """REPLY RULES (from his own log of 250+ replies; follow strictly, they override the profile):
+- Reply to the post itself: about the post, not about him. One thought, funny or precise.
+- Format by post type: meme or irony -> a joke in the same direction, or take it to the absurd. News or a launch -> a twist
+  ("next update: ..."), a non-obvious consequence, or one dry question on the substance. Opinion or hot take -> short
+  agreement with a twist, or calm disagreement with a reason. Guide or tips -> the one point the author missed. Question to
+  the audience -> a direct, concrete answer (a name, a tool, a habit). Someone's build or case -> a question about the most
+  interesting part. Pain ("my automation keeps breaking") -> a one-sentence diagnosis, no selling.
+- The two drafts of one post are two different formats and angles, never the same idea twice.
+- No percentages or invented stats ("30% failed", "2x faster", "saved 10 hours"). A number only if the post has it already,
+  or everyday concreteness ("3 tabs", "47 vulnerabilities"), and in at most one reply in three.
+- First person ("i built", "at work we") only with facts from the profile, at most one reply in three. Never the agent
+  stories or their numbers, and never these worn-out angles: tool calls, tool schemas, "my agent said ... it never called
+  the tool", "same model, two hosts", tool limits, agent success rates.
+- Style: all lowercase, including "i" and names. Plain English (A2-B1), short words, no idioms. At most one question.
+  No emojis, hashtags, links, em dashes, semicolons, lists, no @author at the start. No praise ("great post", "this!",
+  "so true"). No AI words: delve, crucial, game-changer, landscape, leverage, ecosystem, unlock, nuanced, robust,
+  "it's worth noting". No "not X but Y" frames, no lists of three, no question just to farm engagement.
+- Never "let's connect", "followed", profile plugs.
+- Do not invent facts: if unsure, ask it as a question. Never call the author a liar without data. Use what you know for
+  sure about the story when it makes the reply sharper (a known precedent, a real date, a real product).
+- One story, one reply: when several posts cover the same story, write drafts only under the best post for it and skip
+  the other posts of that story (no block for them).
+- RECENT REPLIES (in the input) were already sent: never repeat their openings, phrases or angles. HIS EDITS show how he
+  rewrites drafts: write closer to what he sent.
+- His best replies so far, write in this direction:
+  next update: it opens a pull request that just says "no"
+  no. would you respect a dev in 2010 who refused to use google?
+  npm audit: 47 vulnerabilities, audit fix: 52"""
+
 COMMON = """Input: reader profile, then numbered posts. Post line: n|author|followers|age|views|likes|replies|reposts|bookmarks|to_come|crowd|text
 to_come = views the post is still expected to get (a model estimate, 0 when older than 3h): the audience a new reply can still reach.
 crowd = replies per 10k views: under 3 a new reply still gets seen, 10+ means it drowns.
@@ -139,6 +170,8 @@ Fields:
 GIST <what happened, 1-2 sentences, keep names and numbers>
 CONTEXT <what led to it, for someone who missed it; only what you know for sure>
 WHY <why it is hot and why a post on it can travel today, max 20 words>
+SAY <a reply under this post, 30-90 characters (only if the post is under 3h old with a quiet thread; else omit)>
+SAY <a second reply in a different format (same condition)>
 TAKE <a post draft, under 200 characters: a hot take, a fear angle or a question that begs replies>
 TAKE <a second draft with a different angle>
 TAKE <a third, optional>""",
@@ -148,8 +181,8 @@ opinion, a joke or a question. Any topic counts (news, tech, money, work, everyd
 Fields:
 GIST <what the post says, 1 sentence>
 WHY <why replying here is worth it now, max 15 words>
-SAY <a reply of 30-90 characters: an opinion or joke on this exact post>
-ASK <a reply as a sharp question, 30-90 characters>""",
+SAY <a reply of 30-90 characters on this exact post, format by post type>
+ASK <a second reply, a different format and angle, 30-90 characters; a question only if a question is the best format>""",
     "viral": """You study viral posts to find formats the reader can learn from. These posts are too old to reply under:
 replies posted 18 h after the post got a median of 127 views. """ + VOICE + """
 Pick up to 12 posts whose format or angle he can reuse (one-line hot takes, "the biggest problem won't
@@ -166,18 +199,35 @@ OPPOSITE <only if the post's view clashes with his profile: a quote-post taking 
 These replies are for volume and goodwill: light, friendly, on the post's point. Never "let's connect", "followed",
 "done on my side", follow-for-follow, links or self-promo. Skip politics, crypto shilling, rage bait.
 Fields:
-SAY <a reply of 30-90 characters, reacting to the post's point>
-SAY <another, different reply>""",
+SAY <a reply of 30-90 characters on the post's point, format by post type>
+SAY <another reply, a different format and angle>""",
 }
 
 
+REPLY_STAGES = ("news", "big", "trash")
+
+
 def system(stage, gist_lang="English"):
-    return (PROMPTS[stage] + "\n" + COMMON).replace("{gist_lang}", gist_lang or "English")
+    rules = "\n" + REPLY_RULES if stage in REPLY_STAGES else ""
+    return (PROMPTS[stage] + rules + "\n" + COMMON).replace("{gist_lang}", gist_lang or "English")
 
 
-def digest(profile, posts, trends=None):
-    """→ (prompt, index). index maps "n" → post and "t<k>" → trend."""
-    lines, index = ["PROFILE:", (profile or "").strip(), "", "POSTS:"], {}
+def history_lines(sent, edits):
+    """Already sent replies and his draft -> sent edits, for the reply stages' input."""
+    lines = []
+    if sent:
+        lines += ["RECENT REPLIES:"] + [f"- {compact_text(t, 140)}" for t in sent]
+    if edits:
+        lines += ["", "HIS EDITS (draft -> sent):"] + [f"- {compact_text(d, 120)} -> {compact_text(t, 120)}" for d, t in edits]
+    return lines
+
+
+def digest(profile, posts, trends=None, history=None):
+    """→ (prompt, index). index maps "n" → post and "t<k>" → trend. history: history_lines() for reply stages."""
+    lines, index = ["PROFILE:", (profile or "").strip(), ""], {}
+    if history:
+        lines += history + [""]
+    lines.append("POSTS:")
     for n, p in enumerate(posts, 1):
         index[str(n)] = p
         media = "".join(f"[{'vid' if m in ('video', 'animated_gif') else 'img'}]" for m in sorted(set(p.get("media") or [])))
