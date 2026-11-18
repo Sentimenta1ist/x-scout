@@ -41,8 +41,8 @@ def _chrome_ua():
         return None
 
 
-async def _context(pw, headless, profile=None):
-    kwargs = dict(
+async def _context(pw, headless, profile=None, **extra):
+    kwargs = dict(**extra,
         user_data_dir=str(profile or BROWSER_PROFILE),
         channel="chrome",
         headless=headless,

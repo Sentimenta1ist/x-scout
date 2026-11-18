@@ -84,7 +84,8 @@ class Typer:
             return
         try:
             self._pw = await async_playwright().start()
-            self._ctx = await browser._context(self._pw, headless=False, profile=TYPER_PROFILE)
+            self._ctx = await browser._context(self._pw, headless=False, profile=TYPER_PROFILE,
+                                              ignore_default_args=["--no-sandbox"])
             self.page = self._ctx.pages[0] if self._ctx.pages else await self._ctx.new_page()
             self.page.on("response", self._on_response)
         except BaseException:
@@ -149,6 +150,9 @@ class Typer:
             await self.page.goto(item["url"], wait_until="domcontentloaded")
             box = self.page.locator(BOX).first
             await box.wait_for(timeout=20000)
+            refuse = self.page.get_by_role("button", name=re.compile("refuse non-essential", re.I))
+            if await refuse.count():  # the most private choice; the banner also covers the reply box
+                await refuse.first.click()
             await asyncio.sleep(random.uniform(1.5, 3))
             if mine := own_reply(self._payloads, item["id"], own_handle):
                 db.log_sent(item["run_id"], item, None, "already", sent_id=mine if isinstance(mine, str) else None)
