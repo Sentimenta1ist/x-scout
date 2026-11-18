@@ -12,6 +12,7 @@ DATA.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA / "x-scout.db"
 BROWSER_PROFILE = DATA / "browser-profile"
+TYPER_PROFILE = DATA / "typer-profile"  # the type button's own Chrome: works while a Run holds BROWSER_PROFILE
 PROFILE_MD = DATA / "profile.md"
 SETTINGS_JSON = DATA / "settings.json"
 POSTS = DATA / "posts"  # pasted posts and their analyses

@@ -107,7 +107,6 @@ async def login_check():
 @app.post("/api/run")
 async def start_run():
     _busy()
-    await typer.close()  # the run needs the same Chrome profile
     _spawn(pipeline.run_day(pipeline.load_settings()))
     return {"ok": True}
 
@@ -134,8 +133,7 @@ async def reanalyze(run_id: int):
 
 @app.post("/api/type")
 async def type_reply(body: dict = Body(...)):
-    """Type a reply draft into X key by key; the owner presses Reply himself."""
-    _busy()
+    """Type a reply draft into X key by key; the owner presses Reply himself. Own Chrome profile: fine during a Run."""
     if typer.state.get("status") in ("opening", "typing"):
         raise HTTPException(409, "still typing the previous one")
     item = {k: body.get(k) for k in ("run_id", "id", "url", "key", "stage", "author", "draft")}

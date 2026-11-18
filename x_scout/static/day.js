@@ -140,7 +140,7 @@
   }
 
   // ---- type: the draft (edited in place) is typed into X key by key, the owner presses Reply ----
-  const TYPE_LABEL = { opening: "opening…", typing: "typing…", waiting: "press Reply in Chrome", sent: "sent ✓", already: "already replied ✓", error: "failed" };
+  const TYPE_LABEL = { opening: "opening…", login: "log in to X in that window, then type again", typing: "typing…", waiting: "press Reply in Chrome", sent: "sent ✓", already: "already replied ✓", error: "failed" };
   let typing = null;  // {key, btn}
 
   function typeBtn(p, li) {
@@ -177,7 +177,7 @@
       window.renderBoard();
       return;
     }
-    if (s.status !== "error" && s.status !== "idle") setTimeout(() => pollType(b), 1500);
+    if (!["error", "idle", "login"].includes(s.status)) setTimeout(() => pollType(b), 1500);
   }
 
   function renderStage(run, stage) {

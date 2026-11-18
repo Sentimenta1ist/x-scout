@@ -5,7 +5,8 @@ reply from the own account (then it stops and the card is ticked), clicks the re
 a time: 40-130 ms per key, longer after spaces and punctuation, a rare long pause, Enter for a line break. The owner
 reads it, edits it if he wants and presses Reply himself: nothing here clicks Reply or Post. X's own CreateTweet
 response is caught and logged in the `sent` table (draft, sent text with his edits, ids) and ticks the card.
-The window closes after IDLE_S without clicks and before a Run, which needs the same profile.
+It has its own Chrome profile (TYPER_PROFILE, one login), so it works while a Run is searching in the main one.
+The window closes after IDLE_S without clicks.
 """
 import asyncio
 import json
@@ -15,6 +16,7 @@ import re
 from playwright.async_api import async_playwright
 
 from . import browser, db
+from .config import TYPER_PROFILE
 
 PUNCT = set(".,!?:;")
 BOX = '[data-testid="tweetTextarea_0"]'
@@ -72,20 +74,17 @@ def own_reply(payloads, post_id, handle):
 
 class Typer:
     def __init__(self):
-        self.state = {"status": "idle"}  # idle | opening | typing | waiting | sent | already | error
+        self.state = {"status": "idle"}  # idle | opening | login | typing | waiting | sent | already | error
         self._pw = self._ctx = self.page = None
         self._payloads, self._item = [], None
         self._idle = None
-        self._held = False
 
     async def _open(self):
         if self._ctx:
             return
-        await browser._lock.acquire()
-        self._held = True
         try:
             self._pw = await async_playwright().start()
-            self._ctx = await browser._context(self._pw, headless=False)
+            self._ctx = await browser._context(self._pw, headless=False, profile=TYPER_PROFILE)
             self.page = self._ctx.pages[0] if self._ctx.pages else await self._ctx.new_page()
             self.page.on("response", self._on_response)
         except BaseException:
@@ -102,9 +101,6 @@ class Typer:
             pass
         finally:
             self._ctx = self._pw = self.page = None
-            if self._held:
-                self._held = False
-                browser._lock.release()
             if self.state.get("status") not in ("sent", "already", "error"):
                 self.state = {"status": "idle"}
 
@@ -144,6 +140,11 @@ class Typer:
         self.state = {"status": "opening", "id": item["id"], "key": item.get("key")}
         try:
             await self._open()
+            if not any(c["name"] == "auth_token" for c in await self._ctx.cookies("https://x.com")):
+                await self.page.goto("https://x.com/i/flow/login")
+                await self.page.bring_to_front()
+                self.state = {"status": "login", "id": item["id"], "key": item.get("key")}
+                return
             self._payloads, self._item = [], None
             await self.page.goto(item["url"], wait_until="domcontentloaded")
             box = self.page.locator(BOX).first
