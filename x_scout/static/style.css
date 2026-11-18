@@ -349,6 +349,9 @@ body { display: flex; min-height: 100vh; }
 .freplies li:hover .fcopy, .fcopy:focus-visible { opacity: 1; }
 .fcopy .ic { width: 14px; height: 14px; }
 .fcopy.copied { color: var(--good); opacity: 1; }
+.ftype { flex: none; font-size: 12px; color: var(--accent); white-space: nowrap; }
+.freplies .ftext[contenteditable] { outline: none; border-radius: 4px; }
+.freplies .ftext[contenteditable]:focus { box-shadow: 0 0 0 1px var(--line); }
 @media (hover: none) { .fcopy { opacity: .7; } }
 .fmore { margin-top: 10px; }
 .fmore summary { display: flex; gap: 12px; align-items: center; cursor: pointer; list-style: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }

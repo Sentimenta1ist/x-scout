@@ -128,9 +128,53 @@
         ${p.trend ? `<div class="fd"><span>Trend</span><p>${esc(p.trend.name)}${p.trend.context ? ` — ${esc(p.trend.context)}` : ""}</p></div>`
                   : `<div class="fd"><span>Post</span><p class="ftext-full">${richText(p.text)}</p>${p.quoted ? `<p class="fquoted">${richText(p.quoted.slice(0, 600))}</p>` : ""}</div>`}
       </details>`;
-    el.querySelectorAll(".freplies li").forEach((li, i) => li.appendChild(copyBtn(list[i][1])));
+    el.querySelectorAll(".freplies li").forEach((li, i) => {
+      li.appendChild(copyBtn(list[i][1]));
+      if (REPLY_STAGES.has(p.stage) && !p.trend && (list[i][0] === "say" || list[i][0] === "ask")) li.appendChild(typeBtn(p, li));
+    });
     el.querySelector(".fmeta-row").insertBefore(box(key), el.querySelector(".fopen"));
     return el;
+  }
+
+  // ---- type: the draft (edited in place) is typed into X key by key, the owner presses Reply ----
+  const TYPE_LABEL = { opening: "opening…", typing: "typing…", waiting: "press Reply in Chrome", sent: "sent ✓", already: "already replied ✓", error: "failed" };
+  let typing = null;  // {key, btn}
+
+  function typeBtn(p, li) {
+    const t = li.querySelector(".ftext");
+    t.contentEditable = "plaintext-only";
+    t.spellcheck = false;
+    t.title = "Edit before typing";
+    const b = document.createElement("button");
+    b.className = "link ftype";
+    b.textContent = typing && typing.key === p.key ? (TYPE_LABEL[typing.status] || "type") : "type";
+    b.title = "Type into X key by key; you press Reply";
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        await post("/api/type", { run_id: current.id, id: p.id, url: p.url, key: p.key, stage: p.stage,
+                                  author: p.author.handle, draft: t.innerText.trim() });
+        typing = { key: p.key, status: "opening" };
+        b.textContent = TYPE_LABEL.opening;
+        pollType(b);
+      } catch (err) { b.textContent = "busy"; b.title = String(err); }
+    };
+    return b;
+  }
+
+  async function pollType(b) {
+    let s;
+    try { s = await api("/api/type"); } catch { return; }
+    typing = { key: s.key, status: s.status };
+    b.textContent = TYPE_LABEL[s.status] || "type";
+    if (s.error) b.title = s.error;
+    if (s.status === "sent" || s.status === "already") {
+      current.checks = (await api(`/api/runs/${current.id}`)).checks;
+      typing = null;
+      window.renderBoard();
+      return;
+    }
+    if (s.status !== "error" && s.status !== "idle") setTimeout(() => pollType(b), 1500);
   }
 
   function renderStage(run, stage) {

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import browser, db, pipeline, post_analysis, profile_store
+from .typer import typer
 from .config import PORT, PROFILE_MD, ROOT
 
 STATIC = ROOT / "x_scout" / "static"
@@ -106,6 +107,7 @@ async def login_check():
 @app.post("/api/run")
 async def start_run():
     _busy()
+    await typer.close()  # the run needs the same Chrome profile
     _spawn(pipeline.run_day(pipeline.load_settings()))
     return {"ok": True}
 
@@ -128,6 +130,31 @@ async def reanalyze(run_id: int):
         raise HTTPException(404, "run has no stored candidates")
     _spawn(pipeline.reanalyze(run_id, pipeline.load_settings()))
     return {"ok": True}
+
+
+@app.post("/api/type")
+async def type_reply(body: dict = Body(...)):
+    """Type a reply draft into X key by key; the owner presses Reply himself."""
+    _busy()
+    if typer.state.get("status") in ("opening", "typing"):
+        raise HTTPException(409, "still typing the previous one")
+    item = {k: body.get(k) for k in ("run_id", "id", "url", "key", "stage", "author", "draft")}
+    if not item["id"] or not (item["draft"] or "").strip():
+        raise HTTPException(400, "id and draft are required")
+    item["draft"] = item["draft"].strip()
+    item["url"] = item["url"] or f"https://x.com/i/status/{item['id']}"
+    _spawn(typer.type_reply(item, pipeline.load_settings().get("own_handle")))
+    return {"ok": True}
+
+
+@app.get("/api/type")
+def type_state():
+    return typer.state
+
+
+@app.get("/api/sent")
+def sent():
+    return sorted(db.sent_ids())
 
 
 @app.get("/api/runs")

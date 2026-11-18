@@ -1,31 +1,29 @@
-"""Typing helper: takes reply drafts from a staged run and types them into X's reply box one key at a time.
+"""Typing helper behind the "type" button on reply drafts.
 
-The owner reads every draft, can edit it, and presses Reply himself: this script never clicks Reply or Post.
-Sent replies are caught from X's own CreateTweet response and logged in the `sent` table, so later queues skip
-posts that already got a reply and the draft → sent pairs show how the owner edits.
-
-    uv run python -m x_scout.typer              # latest run, 5 replies
-    uv run python -m x_scout.typer --run 18 --limit 4
+One visible Chrome on the app's profile stays open between clicks. A click opens the post, checks the thread for a
+reply from the own account (then it stops and the card is ticked), clicks the reply box and types the draft one key at
+a time: 40-130 ms per key, longer after spaces and punctuation, a rare long pause, Enter for a line break. The owner
+reads it, edits it if he wants and presses Reply himself: nothing here clicks Reply or Post. X's own CreateTweet
+response is caught and logged in the `sent` table (draft, sent text with his edits, ids) and ticks the card.
+The window closes after IDLE_S without clicks and before a Run, which needs the same profile.
 """
-import argparse
 import asyncio
 import json
 import random
-from datetime import datetime, timezone
+import re
 
 from playwright.async_api import async_playwright
 
-from . import db
-from .browser import _context
-from .scoring import reply_fit
+from . import browser, db
 
-STAGES = ("big", "news", "trash")  # Viral and Topics replies come too late (2026-11-17 review)
 PUNCT = set(".,!?:;")
 BOX = '[data-testid="tweetTextarea_0"]'
+IDLE_S = 15 * 60
+_GRAPHQL_OP = re.compile(r"/graphql/[^/]+/(\w+)")
 
 
 def key_delays(text, rng=random):
-    """Pause after each character, in seconds: 40-130 ms, longer after spaces and punctuation, rare long 'thinking' pauses."""
+    """Pause after each character, in seconds."""
     out = []
     for ch in text:
         d = rng.uniform(0.04, 0.13)
@@ -39,136 +37,141 @@ def key_delays(text, rng=random):
     return out
 
 
-def _age_min(created_at, now):
-    try:
-        t = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-    except (AttributeError, ValueError):
-        return None
-    return (now - t).total_seconds() / 60
-
-
-def pick_queue(stages, sent_ids, limit=5, now=None):
-    """Reply drafts from a run's stage picks that still pass the three checks now and got no reply from us yet.
-    → [{id, url, author, text, draft, stage, age_min}], best stage first."""
-    now = now or datetime.now(timezone.utc)
-    out, seen = [], set(sent_ids)
-    for stage in STAGES:
-        for p in (stages.get(stage) or {}).get("picks") or []:
-            pid, says = p.get("id"), [s for s in (p.get("say") or []) if s and s.strip()]
-            if not pid or pid in seen or not says:
-                continue
-            age = _age_min(p.get("created_at"), now)
-            if not reply_fit({**p, "age_min": age})["ok"]:
-                continue
-            seen.add(pid)
-            out.append({"id": pid, "url": p.get("url") or f"https://x.com/i/status/{pid}",
-                        "author": (p.get("author") or {}).get("handle"), "text": p.get("text") or "",
-                        "draft": says[0].strip(), "stage": stage, "age_min": round(age)})
-    return out[:limit]
-
-
 def sent_from_request(post_data):
     """CreateTweet request body → (text, in_reply_to id)."""
     try:
         v = json.loads(post_data or "{}").get("variables") or {}
     except ValueError:
         return None, None
-    return v.get("tweet_text"), ((v.get("reply") or {}).get("in_reply_to_tweet_id"))
+    return v.get("tweet_text"), (v.get("reply") or {}).get("in_reply_to_tweet_id")
 
 
-async def type_text(page, text, rng=random):
-    for ch, d in zip(text, key_delays(text, rng)):
-        if ch == "\n":
-            await page.keyboard.press("Enter")
-        else:
-            await page.keyboard.type(ch)
-        await asyncio.sleep(d)
+def _screen_name(t):
+    u = ((t.get("core") or {}).get("user_results") or {}).get("result") or {}
+    return (u.get("core") or {}).get("screen_name") or (u.get("legacy") or {}).get("screen_name")
 
 
-def _ask(prompt):
-    return input(prompt).strip()
+def own_reply(payloads, post_id, handle):
+    """Id of a reply by `handle` to `post_id` found anywhere in TweetDetail responses, else None."""
+    handle = (handle or "").lstrip("@").lower()
+    if not handle:
+        return None
+    stack = list(payloads)
+    while stack:
+        x = stack.pop()
+        if isinstance(x, list):
+            stack.extend(x)
+        elif isinstance(x, dict):
+            leg = x.get("legacy")
+            if (isinstance(leg, dict) and leg.get("in_reply_to_status_id_str") == str(post_id)
+                    and (_screen_name(x) or "").lower() == handle):
+                return x.get("rest_id") or leg.get("id_str") or True
+            stack.extend(x.values())
+    return None
 
 
-async def session(items, run_id, pause=(30, 60)):
-    caught = []  # (text, in_reply_to, new id) from CreateTweet
+class Typer:
+    def __init__(self):
+        self.state = {"status": "idle"}  # idle | opening | typing | waiting | sent | already | error
+        self._pw = self._ctx = self.page = None
+        self._payloads, self._item = [], None
+        self._idle = None
+        self._held = False
 
-    async def on_response(resp):
-        if "/CreateTweet" not in resp.url or resp.status != 200:
+    async def _open(self):
+        if self._ctx:
             return
-        text, reply_to = sent_from_request(resp.request.post_data)
+        await browser._lock.acquire()
+        self._held = True
         try:
-            new_id = (await resp.json())["data"]["create_tweet"]["tweet_results"]["result"]["rest_id"]
+            self._pw = await async_playwright().start()
+            self._ctx = await browser._context(self._pw, headless=False)
+            self.page = self._ctx.pages[0] if self._ctx.pages else await self._ctx.new_page()
+            self.page.on("response", self._on_response)
+        except BaseException:
+            await self.close()
+            raise
+
+    async def close(self):
+        try:
+            if self._ctx:
+                await self._ctx.close()
+            if self._pw:
+                await self._pw.stop()
         except Exception:
-            new_id = None
-        caught.append((text, reply_to, new_id))
-
-    async with async_playwright() as pw:
-        ctx = await _context(pw, headless=False)
-        try:
-            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            page.on("response", on_response)
-            done = 0
-            for n, it in enumerate(items, 1):
-                print(f"\n[{n}/{len(items)}] @{it['author']} · {it['age_min']} мин · {it['url']}")
-                print("  пост:", it["text"][:200].replace("\n", " "))
-                print("  реплай:", it["draft"])
-                a = _ask("  Enter — набрать, e — поправить, s — пропустить, q — выход: ").lower()
-                if a == "q":
-                    break
-                if a == "s":
-                    db.log_sent(run_id, it, None, "skipped")
-                    continue
-                text = it["draft"]
-                if a == "e":
-                    text = _ask("  новый текст: ") or text
-                await page.goto(it["url"], wait_until="domcontentloaded")
-                await asyncio.sleep(random.uniform(2, 4))
-                box = page.locator(BOX).first
-                try:
-                    await box.wait_for(timeout=15000)
-                except Exception:
-                    print("  поле ответа не нашлось, пропускаю")
-                    db.log_sent(run_id, it, None, "no_box", draft=text)
-                    continue
-                await box.click()
-                await asyncio.sleep(random.uniform(0.5, 1.2))
-                caught.clear()
-                await type_text(page, text)
-                _ask("  набрано. проверь, жми Reply в Chrome, потом Enter здесь: ")
-                hit = next((c for c in caught if c[1] == it["id"]), None)
-                if hit:
-                    db.log_sent(run_id, it, hit[0], "sent", draft=text, sent_id=hit[2])
-                    done += 1
-                    print("  отправлено и записано")
-                    if n < len(items):
-                        w = random.uniform(*pause)
-                        print(f"  пауза {w:.0f} с")
-                        await asyncio.sleep(w)
-                else:
-                    db.log_sent(run_id, it, None, "not_sent", draft=text)
-                    print("  отправки не видно, записал как не отправленный")
-            print(f"\nготово: отправлено {done}")
+            pass
         finally:
-            await ctx.close()
+            self._ctx = self._pw = self.page = None
+            if self._held:
+                self._held = False
+                browser._lock.release()
+            if self.state.get("status") not in ("sent", "already", "error"):
+                self.state = {"status": "idle"}
+
+    async def _on_response(self, resp):
+        m = _GRAPHQL_OP.search(resp.url)
+        if not m or resp.status != 200:
+            return
+        op = m.group(1)
+        if op == "CreateTweet" and self._item:
+            text, reply_to = sent_from_request(resp.request.post_data)
+            it = self._item
+            if reply_to != it["id"]:
+                return
+            try:
+                new_id = (await resp.json())["data"]["create_tweet"]["tweet_results"]["result"]["rest_id"]
+            except Exception:
+                new_id = None
+            db.log_sent(it["run_id"], it, text, "sent", sent_id=new_id)
+            if it.get("key"):
+                db.set_check(it["run_id"], it["key"], True)
+            self._item = None
+            self.state = {"status": "sent", "id": it["id"], "key": it.get("key")}
+        elif "Tweet" in op:
+            try:
+                self._payloads.append(await resp.json())
+            except Exception:
+                pass
+
+    def _touch(self):
+        if self._idle:
+            self._idle.cancel()
+        self._idle = asyncio.get_event_loop().call_later(IDLE_S, lambda: asyncio.ensure_future(self.close()))
+
+    async def type_reply(self, item, own_handle):
+        """item: {run_id, id, url, key, stage, author, draft}."""
+        self._touch()
+        self.state = {"status": "opening", "id": item["id"], "key": item.get("key")}
+        try:
+            await self._open()
+            self._payloads, self._item = [], None
+            await self.page.goto(item["url"], wait_until="domcontentloaded")
+            box = self.page.locator(BOX).first
+            await box.wait_for(timeout=20000)
+            await asyncio.sleep(random.uniform(1.5, 3))
+            if mine := own_reply(self._payloads, item["id"], own_handle):
+                db.log_sent(item["run_id"], item, None, "already", sent_id=mine if isinstance(mine, str) else None)
+                if item.get("key"):
+                    db.set_check(item["run_id"], item["key"], True)
+                self.state = {"status": "already", "id": item["id"], "key": item.get("key")}
+                return
+            await self.page.bring_to_front()
+            await box.click()
+            await asyncio.sleep(random.uniform(0.5, 1.2))
+            self.state = {"status": "typing", "id": item["id"], "key": item.get("key")}
+            self._item = {**item}
+            text = item["draft"]
+            for ch, d in zip(text, key_delays(text)):
+                if ch == "\n":
+                    await self.page.keyboard.press("Enter")
+                else:
+                    await self.page.keyboard.type(ch)
+                await asyncio.sleep(d)
+            if self.state.get("status") == "typing":
+                self.state = {"status": "waiting", "id": item["id"], "key": item.get("key")}
+        except Exception as e:
+            self._item = None
+            self.state = {"status": "error", "id": item["id"], "key": item.get("key"), "error": str(e)[:200]}
 
 
-def main():
-    ap = argparse.ArgumentParser(description="type reply drafts from a run into X, one key at a time")
-    ap.add_argument("--run", type=int, help="run id (default: latest)")
-    ap.add_argument("--limit", type=int, default=5)
-    ap.add_argument("--dry", action="store_true", help="only print the queue")
-    a = ap.parse_args()
-    db.init()
-    run_id = a.run or db.latest_run_id()
-    run = db.get_run(run_id)
-    items = pick_queue(run.get("stages") or {}, db.sent_ids(), a.limit)
-    print(f"прогон #{run_id}: в очереди {len(items)}")
-    if a.dry or not items:
-        for it in items:
-            print(f"- @{it['author']} {it['age_min']} мин · {it['draft']}")
-        return
-    asyncio.run(session(items, run_id))
-
-
-if __name__ == "__main__":
-    main()
+typer = Typer()

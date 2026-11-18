@@ -34,7 +34,7 @@ create table if not exists sent (
   target_id text not null,      -- post we replied to
   run_id integer,
   ts text not null,
-  status text not null,         -- sent | skipped | not_sent | no_box
+  status text not null,         -- sent | already (we had replied before the click)
   author text,
   stage text,
   draft text,                   -- what the typer was asked to type
@@ -224,6 +224,6 @@ def log_sent(run_id, item, sent_text, status, draft=None, sent_id=None):
 
 
 def sent_ids():
-    """Posts we already replied to or chose to skip: the typer never offers them again."""
+    """Posts we already replied to."""
     with conn() as c:
-        return {r["target_id"] for r in c.execute("select target_id from sent where status in ('sent','skipped')")}
+        return {r["target_id"] for r in c.execute("select target_id from sent where status in ('sent','already')")}
