@@ -416,3 +416,8 @@ body { display: flex; min-height: 100vh; }
 .fpick.cold:hover { opacity: .9; }
 .fcold { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
 .fcold summary { cursor: pointer; }
+
+/* stage tabs are details next to the Replies / Posts queues */
+.stabs .sdetail { opacity: .6; font-size: .92em; }
+.stabs .sdetail.active, .stabs .sdetail:hover { opacity: 1; }
+.stabs .sfirst { margin-left: 18px; }

@@ -51,17 +51,17 @@ GIST repeat"""
     _, index = stages.digest("me", [post(1), post(2)], [{"name": "Big Story", "context": "c", "meta": "10k posts"}])
     cards = stages.assemble("news", picks, index)
     assert [c["key"] for c in cards] == ["news:2", "news:t:bigstory"]
-    assert cards[0]["take"] == ["first take"] and cards[0]["q"] == 5 and cards[0]["stage"] == "news"
+    assert cards[0]["take"] == ["first take", "second take"] and cards[0]["q"] == 5 and cards[0]["stage"] == "news"
 
 
-def test_assemble_keeps_one_own_post_per_stage():
+def test_assemble_keeps_two_own_posts_per_stage():
     _, index = stages.digest("me", [post(1), post(2)])
     news = stages.assemble("news", [{"n": "1", "q": 5, "take": ["a", "b"], "say": ["r1"]},
                                     {"n": "2", "q": 4, "take": ["c"], "say": ["r2"]}], index)
-    assert [c["take"] for c in news] == [["a"], []] and [c["say"] for c in news] == [["r1"], ["r2"]]
+    assert [c["take"] for c in news] == [["a", "b"], []] and [c["say"] for c in news] == [["r1"], ["r2"]]
     viral = stages.assemble("viral", [{"n": "1", "q": 5, "take": [], "say": [], "rewrite": "x", "opposite": "y"},
                                       {"n": "2", "q": 4, "take": [], "say": [], "rewrite": "z"}], index)
-    assert viral[0]["rewrite"] == "x" and "opposite" not in viral[0] and "rewrite" not in viral[1]
+    assert viral[0]["rewrite"] == "x" and viral[0]["opposite"] == "y" and "rewrite" not in viral[1]
 
 
 def test_summary_parse():

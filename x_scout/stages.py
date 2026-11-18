@@ -28,7 +28,7 @@ MORE_POOL = 60  # candidates the More call reads
 MIN_Q = 3
 # own posts get 10-20 views, replies are the growth: at most this many own-post drafts per stage, best pick first
 OWN_POST_FIELDS = {"news": ("take",), "viral": ("rewrite", "opposite")}
-MAX_OWN_POSTS = 1
+MAX_OWN_POSTS = 2  # News 2 + Viral 2 = the 3-4 own posts a day he wants (2026-11-18)
 
 
 def _since(hours, now=None):
@@ -175,7 +175,7 @@ a bare reaction ("clean diagram", "of course") gets nothing. Never the same line
 
 PROMPTS = {
     "news": """You pick today's hottest news for one X account and write replies under them. """ + VOICE + """
-His growth comes from replies; his own posts get 10-20 views, so replies are the job here, own posts almost never.
+His growth comes from replies; his own posts get 10-20 views, so replies are the job here; own posts are a short extra.
 Also given: trends from X Explore as lines t<k>|name|context|meta; a trend can be a pick too (P t<k> <q>).
 Pick up to 8 news items that everyone is talking about now (tech and AI first, but any big story with a fear, money or
 "what happens to us" angle counts). Merge duplicates: one pick per story, the post for it where a reply still gets seen
@@ -186,8 +186,8 @@ CONTEXT <what led to it, for someone who missed it; only what you know for sure>
 WHY <why replying here is worth it now, max 20 words>
 SAY <a reply under this post, 30-90 characters, format by post type>
 SAY <a second reply in a different format and angle>
-TAKE <an own post draft, under 200 characters. At most ONE TAKE in the whole output, only on the single biggest story
-  of the day, and only if it is clearly worth a post; usually none>""",
+TAKE <an own post draft, under 200 characters. At most TWO TAKE in the whole output, on the two biggest stories
+  of the day, only if they are worth a post>""",
     "big": """You pick fresh posts of big accounts where an early reply gets seen. """ + VOICE + """
 A good pick: posted in the last 1-3 hours, a large to_come, crowd under 10, and the reader can add a sharp
 opinion, a joke or a question. Any topic counts (news, tech, money, work, everyday life), not only AI. Pick up to 20. Skip announcements nobody argues with, ads, giveaways.
@@ -207,7 +207,7 @@ FORMAT <the template in a few words, e.g. "hot take, one line", "prediction with
 WHY <why it spread, citing the numbers in words>
 REPEAT <can he repeat it: yes or no, and how, one line>
 REWRITE <his own post in this format: a different frame and example, never reuse phrases of the original, under 220
-  characters. At most ONE REWRITE in the whole output, on the single best format; usually none: his own posts get 10-20 views>""",
+  characters. At most TWO REWRITE in the whole output, on the two best formats>""",
     "trash": """You pick fresh small and mid-size posts where a quick, light reply is easy. """ + VOICE + """
 These replies are for volume and goodwill: light, friendly, on the post's point. Never "let's connect", "followed",
 "done on my side", follow-for-follow, links or self-promo. Skip politics, crypto shilling, rage bait.
@@ -375,7 +375,7 @@ Output plain text only, no markdown, in {gist_lang}:
 SUMMARY <one line about what is hot today>   (2-4 such lines)
 REC <one concrete action for today or tomorrow's plan, naming the post or story>   (3-5 such lines, most important first)
 Concrete, no filler, no generic advice. His growth comes from replies under fresh posts that are taking off (under 3 h, quiet
-thread); his own posts and quotes get 10-20 views. So recommend replies first, at most one own post a day, never @grok
+thread); his own posts and quotes get 10-20 views. So recommend replies first (25-30 a run), then 3-4 own posts a day, never @grok
 questions or posts for a scheduler."""
 
 

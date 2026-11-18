@@ -1,6 +1,11 @@
 // Staged daily run: one tab per stage (News, Big accounts, Viral, Trash, Topics) and a Checklist.
 // Tabs fill up while the run goes on; every card has a "done" box, boxes belong to the run, so a new Run starts clean.
 (() => {
+  // Replies and Posts are the work: every reply draft of the run in one list, then the own-post drafts. Stage tabs are details.
+  const QUEUES = [
+    ["replies", "Replies", "every fresh reply target of the run: check, type, press Reply"],
+    ["posts", "Posts", "3-4 own posts for today"],
+  ];
   const STAGES = [
     ["news", "News", "replies under the hottest stories while the post is under 3h; at most 1 own post a day"],
     ["big", "Big accounts", "the main source: reply while the post is under 3h and the thread is quiet"],
@@ -9,7 +14,7 @@
     ["trash", "Trash", "replies under smaller posts that are taking off, stay under the limit"],
     ["topics", "Topics", "what survived your topics"],
   ];
-  const LABEL = Object.fromEntries(STAGES.map(([k, l]) => [k, l]));
+  const LABEL = Object.fromEntries([...QUEUES, ...STAGES].map(([k, l]) => [k, l]));
   const FIELDS = {
     news: [["say", "say"], ["take", "post"]],
     big: [["say", "say"], ["ask", "ask"]],
@@ -61,15 +66,17 @@
     const nav = $("stageTabs");
     nav.innerHTML = "";
     const st = run.stages || {};
-    const shown = STAGES.filter(([k]) => st[k] || k === "topics" && run.result);
-    if (!active || (active !== "check" && !shown.find(([k]) => k === active))) {
-      active = (shown.find(([k]) => (st[k] || {}).status === "ready") || shown[0] || ["check"])[0];
-    }
+    const stages = STAGES.filter(([k]) => st[k] || k === "topics" && run.result);
+    const shown = stages.length ? [...QUEUES, ...stages] : [];
+    if (!active || (active !== "check" && !shown.find(([k]) => k === active))) active = shown.length ? "replies" : "check";
     for (const [k, label] of shown) {
       const b = document.createElement("button");
-      const done = doneIn(k).length;
-      b.innerHTML = `${label}${status(st[k])}${done ? `<span class="dn">✓${done}</span>` : ""}`;
-      b.className = k === active ? "active" : "";
+      const isQ = k === "replies" || k === "posts";
+      const done = k === "replies" ? queue(run).filter((p) => checks()[p.key]).length : isQ ? 0 : doneIn(k).length;
+      const cnt = k === "replies" ? `<span class="count">${queue(run).filter((p) => !coldWhy(p).length).length}</span>`
+                : k === "posts" ? `<span class="count">${ownPosts(run).length}</span>` : status(st[k]);
+      b.innerHTML = `${label}${cnt}${done ? `<span class="dn">✓${done}</span>` : ""}`;
+      b.className = (k === active ? "active" : "") + (k === "news" ? " sfirst" : "") + (isQ ? "" : " sdetail");
       b.onclick = () => { active = k; window.renderBoard(); };
       nav.appendChild(b);
     }
@@ -91,7 +98,48 @@
     return out;
   }
 
-  function stageCard(p) {
+  // every reply card of the reply stages, one per post, fresh ones first in stage order (News, Big, More, Trash)
+  function queue(run) {
+    const st = run.stages || {}, seen = new Set(), out = [];
+    for (const s of ["news", "big", "more", "trash"]) {
+      for (const p of (st[s] || {}).picks || []) {
+        if (p.trend || !(p.say && p.say.length || p.ask) || seen.has(p.id)) continue;
+        seen.add(p.id);
+        out.push(p);
+      }
+    }
+    return out.sort((a, b) => (coldWhy(a).length > 0) - (coldWhy(b).length > 0));
+  }
+
+  function ownPosts(run) {
+    const st = run.stages || {};
+    return [...((st.news || {}).picks || []).filter((p) => p.take && p.take.length),
+            ...((st.viral || {}).picks || []).filter((p) => p.rewrite)];
+  }
+
+  function renderQueue(run, kind) {
+    const board = $("board");
+    const sec = document.createElement("section");
+    sec.className = "fsec";
+    const list = kind === "replies" ? queue(run) : ownPosts(run);
+    const warm = list.filter((p) => kind === "posts" || !coldWhy(p).length);
+    const done = list.filter((p) => checks()[kind === "posts" ? `${p.key}:post` : p.key]).length;
+    const sub = kind === "replies" ? `${done} sent of ${warm.length} fresh` : `${done} posted · aim for 3-4`;
+    sec.innerHTML = `<h2>${LABEL[kind]}<span class="n">${warm.length}</span><span class="sub">${esc(sub)}</span></h2>`;
+    const busy = Object.values(run.stages || {}).some((s) => s && ["waiting", "scraping", "analyzing"].includes(s.status));
+    if (busy) sec.insertAdjacentHTML("beforeend", `<p class="fnone">The run is still going: cards are added as stages finish.</p>`);
+    else if (!list.length) sec.insertAdjacentHTML("beforeend", `<p class="fnone">Nothing here in this run. Press Run for fresh posts.</p>`);
+    if (kind === "replies") {
+      const ref = run.finished_at || run.started_at;
+      const mins = ref ? (Date.now() - Date.parse(ref)) / 60000 : 0;
+      if (list.length && mins > RUN_STALE_MIN) sec.insertAdjacentHTML("beforeend", `<p class="fnone warn">This run is ${age(mins)} old: these posts have cooled. Press Run for fresh ones.</p>`);
+    }
+    list.forEach((p) => sec.appendChild(stageCard(p, kind === "replies" ? "reply" : "post")));
+    board.appendChild(sec);
+  }
+
+  // only = "reply" | "post": show just that kind of draft (the Replies / Posts queues)
+  function stageCard(p, only) {
     const el = document.createElement("article");
     const key = p.key;
     el.className = "fpick dcard" + (checks()[key] ? " seen" : "");
@@ -109,11 +157,11 @@
     // Viral is about the format: the post itself is the headline, Claude's gist goes under it
     const head = p.stage === "viral" && p.text ? firstLine : p.gist || (p.trend ? p.trend.name : firstLine);
     const sub = p.stage === "viral" && p.text && p.gist ? p.gist : "";
-    const list = drafts(p);
-    const cold = coldWhy(p);
+    const isReply = ([kind]) => kind === "say" || kind === "ask";
+    const list = drafts(p).filter((d) => !only || (only === "reply") === isReply(d));
+    const cold = only === "post" ? [] : coldWhy(p);
     const hideDrafts = cold.length && REPLY_STAGES.has(p.stage);
     if (hideDrafts) el.classList.add("cold");
-    const isReply = ([kind]) => kind === "say" || kind === "ask";
     const ul = (l) => l.length ? `<ul class="freplies">${l.map(([kind, t]) => `<li><span class="fkind">${kind}</span><span class="ftext">${esc(t)}</span></li>`).join("")}</ul>` : "";
     const draftList = ul(list);
     const extra = [p.format ? `<span class="dfmt">${esc(p.format)}</span>` : "", p.repeat ? `<span class="drep">${esc(p.repeat)}</span>` : ""].join("");
@@ -142,7 +190,7 @@
       if (REPLY_STAGES.has(p.stage) && !p.trend && isReply(shown[i])) li.appendChild(typeBtn(p, li));
       else if (shown[i][0] === "post") li.appendChild(typeBtn(p, li, true));
     });
-    el.querySelector(".fmeta-row").insertBefore(box(key), el.querySelector(".fopen"));
+    el.querySelector(".fmeta-row").insertBefore(box(only === "post" ? `${key}:post` : key), el.querySelector(".fopen"));
     return el;
   }
 
@@ -237,11 +285,11 @@
     const st = run.stages || {};
     const limit = (window.settingsCache || {}).trash_limit || 3;
     const out = [];
-    const replies = ["big", "more", "trash", "news"].reduce((n, s) => n + doneIn(s).length, 0);
-    out.push({ label: "15–20 replies a run, each under a post < 3h with a quiet thread", have: replies, need: 15 });
+    const replies = ["big", "more", "trash", "news"].reduce((n, s) => n + doneIn(s).filter((k) => !k.endsWith(":post")).length, 0);
+    out.push({ label: "25–30 replies a run, each under a post < 3h with a quiet thread", have: replies, need: 25 });
     if (st.big) out.push({ label: "From Big accounts", have: doneIn("big").length, need: 5, who: names("big") });
     if (st.trash) out.push({ label: `Trash replies, up to ${limit}`, have: doneIn("trash").length, need: Math.min(2, limit), max: limit, who: names("trash") });
-    out.push({ label: "At most 1 own post today (quote only on a big-event day)", key: "m:post" });
+    out.push({ label: "3–4 own posts today", have: Object.keys(checks()).filter((k) => k.endsWith(":post")).length, need: 3, max: 4 });
     out.push({ label: "Stop rule: two days in a row with a median under 60 views per reply → back to 20–25 a day", key: "m:stop" });
     if (own && own.handle) {
       const days = own.last ? Math.floor((Date.now() - new Date(own.last)) / 864e5) : null;
@@ -301,7 +349,9 @@
       const stage = tabs(run);
       if (stage === "topics") return false;
       $("tabs").innerHTML = "";
-      if (stage === "check") renderChecklist(run); else renderStage(run, stage);
+      if (stage === "check") renderChecklist(run);
+      else if (stage === "replies" || stage === "posts") renderQueue(run, stage);
+      else renderStage(run, stage);
       return true;
     },
     box,
