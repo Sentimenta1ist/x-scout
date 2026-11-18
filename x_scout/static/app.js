@@ -356,7 +356,7 @@ for (const [view, [, nav, ic, label]] of Object.entries(VIEWS)) {
 try { setView(localStorage.getItem("view") || "feed"); } catch { setView("feed"); }
 
 const act = (fn) => async () => { try { await fn(); } catch (e) { alert(e.message); } refresh(); };
-$("runBtn").onclick = act(() => post("/api/run"));
+$("runBtn").onclick = act(() => { pinned = null; return post("/api/run"); });  // a new run is followed again
 $("stopBtn").onclick = act(() => post("/api/stop"));
 $("loginBtn").onclick = act(() => post("/api/login"));
 $("checkBtn").onclick = act(() => post("/api/login/check"));
