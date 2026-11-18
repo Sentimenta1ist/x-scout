@@ -13,7 +13,7 @@
   const FIELDS = {
     news: [["say", "say"], ["take", "post"]],
     big: [["say", "say"], ["ask", "ask"]],
-    viral: [["grok", "grok"], ["rewrite", "yours"], ["opposite", "quote"], ["opinion", "topic"]],
+    viral: [["grok", "grok"], ["rewrite", "post"], ["opposite", "quote"], ["opinion", "topic"]],
     trash: [["say", "say"]],
     more: [["say", "say"]],
   };
@@ -105,7 +105,10 @@
               `${k(p.views)} views`, `${k(p.replies)} replies`, p.fit ? `${p.fit.crowd}/10k` : ""].filter(Boolean).join(" · ");
       url = p.url;
     }
-    const head = p.gist || (p.trend ? p.trend.name : (p.text || "").split("\n")[0].slice(0, 220));
+    const firstLine = (p.text || "").split("\n").filter((l) => l.trim()).slice(0, 3).join(" · ").slice(0, 280);
+    // Viral is about the format: the post itself is the headline, Claude's gist goes under it
+    const head = p.stage === "viral" && p.text ? firstLine : p.gist || (p.trend ? p.trend.name : firstLine);
+    const sub = p.stage === "viral" && p.text && p.gist ? p.gist : "";
     const list = drafts(p);
     const cold = coldWhy(p);
     const hideDrafts = cold.length && REPLY_STAGES.has(p.stage);
@@ -123,6 +126,7 @@
         <a class="fopen" href="${url}" target="_blank" rel="noopener" title="Open on X">↗</a>
       </div>
       <p class="fgist">${esc(head)}</p>
+      ${sub ? `<p class="fwhy">${esc(sub)}</p>` : ""}
       ${p.why ? `<p class="fwhy">${esc(p.why)}</p>` : ""}
       ${extra ? `<p class="dline">${extra}</p>` : ""}
       ${hideDrafts ? (list.some(isReply) ? `<details class="fcold"><summary>${esc(cold.join(" · "))}: replies hidden</summary>${ul(list.filter(isReply))}</details>` : `<p class="fnone">${esc(cold.join(" · "))}</p>`) + ul(list.filter((d) => !isReply(d))) : draftList}

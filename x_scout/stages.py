@@ -23,8 +23,8 @@ BIG_ACCOUNTS = [
     "amasad", "TheHackersNews", "theo", "ThePrimeagen", "garrytan", "pmarca", "Jason",
 ]
 
-MAX_PICKS = {"news": 8, "big": 15, "viral": 12, "trash": 8, "more": 15}
-MORE_POOL = 40  # candidates the More call reads
+MAX_PICKS = {"news": 8, "big": 20, "viral": 12, "trash": 10, "more": 25}
+MORE_POOL = 60  # candidates the More call reads
 MIN_Q = 3
 # own posts get 10-20 views, replies are the growth: at most this many own-post drafts per stage, best pick first
 OWN_POST_FIELDS = {"news": ("take",), "viral": ("rewrite", "opposite")}
@@ -70,6 +70,9 @@ def queries(stage, settings, now=None):
         return [
             ("live", f'(AI OR coding OR "vibe coding" OR startup OR developer OR "Claude Code" OR ChatGPT){lo} -filter:replies min_faves:10 {s(2)}', 40),
             ("live", f'(job OR career OR "side project" OR SaaS OR founder OR "9-5"){lo} -filter:replies min_faves:10 {s(2)}', 40),
+            # any topic, small and mid accounts taking off now: the two tech queries alone left Trash with 1 candidate (run #22)
+            ("live", f"min_faves:50{lo} -filter:replies {s(2)}", 40),
+            ("live", f"(money OR work OR boss OR rent OR gym OR coffee OR life OR game OR movie OR music){lo} -filter:replies min_faves:30 {s(2)}", 40),
         ]
     return []
 
@@ -187,7 +190,7 @@ TAKE <an own post draft, under 200 characters. At most ONE TAKE in the whole out
   of the day, and only if it is clearly worth a post; usually none>""",
     "big": """You pick fresh posts of big accounts where an early reply gets seen. """ + VOICE + """
 A good pick: posted in the last 1-3 hours, a large to_come, crowd under 10, and the reader can add a sharp
-opinion, a joke or a question. Any topic counts (news, tech, money, work, everyday life), not only AI. Pick up to 15. Skip announcements nobody argues with, ads, giveaways.
+opinion, a joke or a question. Any topic counts (news, tech, money, work, everyday life), not only AI. Pick up to 20. Skip announcements nobody argues with, ads, giveaways.
 Fields:
 GIST <what the post says, 1 sentence>
 WHY <why replying here is worth it now, max 15 words>
@@ -213,7 +216,7 @@ SAY <a reply of 30-90 characters on the post's point, format by post type>
 SAY <another reply, a different format and angle>""",
     "more": """You write extra replies for one X account. These posts all passed his reply checks (fresh, quiet thread,
 heading to 50k+ views) but were not picked in the main tabs; some come from an earlier run and are still fresh. """ + VOICE + """
-Goal: more good reply targets, up to 15. Any topic counts (news, tech, money, work, everyday life, culture, sports:
+Goal: more good reply targets, up to 25. Any topic counts (news, tech, money, work, everyday life, culture, sports:
 he likes basketball and volleyball). Skip: war and attacks, tragedies and deaths, conspiracy, politics for its own sake, ads,
 giveaways, crypto shilling, posts with nothing to say about, and stories in COVERED (they already have a reply today).
 Fields:

@@ -357,7 +357,7 @@ def _topics_analysis(run_id, candidates, settings):
 
 def _more_job(run_id, settings):
     """More tab: replies under every post that passed the checks but wasn't picked, plus still-fresh posts of runs
-    from the last 3 h. Main tabs pick the best few; this one turns the rest into reply targets (15-20 a run)."""
+    from the last 3 h. Main tabs pick the best few; this one turns the rest into reply targets (25-30 a run)."""
     run = db.get_run(run_id) or {}
     stages = run.get("stages") or {}
     picks = [p for st in ("news", "big", "trash") for p in (stages.get(st) or {}).get("picks") or []]
