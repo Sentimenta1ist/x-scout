@@ -159,6 +159,10 @@ class Typer:
             await self.page.bring_to_front()
             await box.click()
             await asyncio.sleep(random.uniform(0.5, 1.2))
+            if (await box.inner_text()).strip():  # leftovers from an earlier draft or a stray key press
+                await self.page.keyboard.press("Meta+A")
+                await self.page.keyboard.press("Backspace")
+                await asyncio.sleep(random.uniform(0.3, 0.6))
             self.state = {"status": "typing", "id": item["id"], "key": item.get("key")}
             self._item = {**item}
             text = item["draft"]
@@ -169,7 +173,12 @@ class Typer:
                     await self.page.keyboard.type(ch)
                 await asyncio.sleep(d)
             if self.state.get("status") == "typing":
-                self.state = {"status": "waiting", "id": item["id"], "key": item.get("key")}
+                try:
+                    typed = (await box.inner_text()).strip()
+                except Exception:
+                    typed = None
+                self.state = {"status": "waiting", "id": item["id"], "key": item.get("key"), "typed": typed,
+                              "exact": typed == text}
         except Exception as e:
             self._item = None
             self.state = {"status": "error", "id": item["id"], "key": item.get("key"), "error": str(e)[:200]}

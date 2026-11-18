@@ -171,6 +171,7 @@
     typing = { key: s.key, status: s.status };
     b.textContent = TYPE_LABEL[s.status] || "type";
     if (s.error) b.title = s.error;
+    if (s.status === "waiting" && s.exact === false) { b.textContent = "check the text in Chrome"; b.title = `in the box: ${s.typed || ""}`; }
     if (s.status === "sent" || s.status === "already") {
       current.checks = (await api(`/api/runs/${current.id}`)).checks;
       typing = null;
