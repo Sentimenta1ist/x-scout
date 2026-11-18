@@ -30,6 +30,18 @@ create table if not exists runs (
   stats text,                   -- json: counts, tokens, cost, timings
   candidates text               -- json: {topic: [posts]} sent to Claude, lets us re-run analysis without scraping
 );
+create table if not exists sent (
+  target_id text not null,      -- post we replied to
+  run_id integer,
+  ts text not null,
+  status text not null,         -- sent | skipped | not_sent | no_box
+  author text,
+  stage text,
+  draft text,                   -- what the typer was asked to type
+  sent_text text,               -- what X received (owner edits included)
+  sent_id text                  -- id of our reply
+);
+create index if not exists sent_target on sent(target_id);
 """
 
 
@@ -202,3 +214,16 @@ def good_authors(topic, limit=15, runs=40, min_followers=1000):
                     if (p.get("q") or 0) >= 4 and (a.get("followers") or 0) >= min_followers and a.get("handle"):
                         counts[a["handle"]] = counts.get(a["handle"], 0) + 1
     return [h for h, _ in sorted(counts.items(), key=lambda x: -x[1])][:limit]
+
+
+def log_sent(run_id, item, sent_text, status, draft=None, sent_id=None):
+    with conn() as c:
+        c.execute("insert into sent (target_id, run_id, ts, status, author, stage, draft, sent_text, sent_id) values (?,?,?,?,?,?,?,?,?)",
+                  (item["id"], run_id, now_iso(), status, item.get("author"), item.get("stage"),
+                   draft or item.get("draft"), sent_text, sent_id))
+
+
+def sent_ids():
+    """Posts we already replied to or chose to skip: the typer never offers them again."""
+    with conn() as c:
+        return {r["target_id"] for r in c.execute("select target_id from sent where status in ('sent','skipped')")}
