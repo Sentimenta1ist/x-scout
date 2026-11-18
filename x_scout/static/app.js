@@ -22,6 +22,7 @@ let activeTopic = null;
 let wasRunning = false;
 let logOpen = false;
 let lastSig = "";
+let pinned = null;  // a run the user picked in the list while another is running: polling must not pull him away
 
 // "seen" marks are a per-browser convenience
 const seen = (() => {
@@ -226,7 +227,7 @@ async function loadRuns(selectId) {
     const tok = c ? ` · ${k(c.input_tokens + c.output_tokens)} tok` : "";
     return `<option value="${r.id}">#${r.id} ${when}${mark} — ${esc(topics)}${tok}</option>`;
   }).join("");
-  const id = selectId || (runs.find((r) => r.status === "done") || runs[0] || {}).id;
+  const id = selectId || (runs.find((r) => r.status !== "error") || runs[0] || {}).id;
   if (id) { sel.value = id; await loadRun(id); } else { current = null; renderBoard(); $("empty").classList.remove("hidden"); }
 }
 
@@ -265,10 +266,11 @@ async function refresh() {
     $("log").scrollTop = 1e9;
     if (s.running && s.kind === "run" && s.run_id) {
       const sig = JSON.stringify(Object.entries(s.stages || {}).map(([key, v]) => [key, v.status, v.count]));
-      if (!current || current.id !== s.run_id) { lastSig = sig; await loadRuns(s.run_id); }
+      if (pinned && pinned !== s.run_id) { /* he is reading another run: leave it */ }
+      else if (!current || current.id !== s.run_id) { lastSig = sig; await loadRuns(s.run_id); }
       else if (sig !== lastSig) { lastSig = sig; await loadRun(s.run_id); }
     }
-    if (wasRunning && !s.running && s.kind === "run") await loadRuns(s.run_id);
+    if (wasRunning && !s.running && s.kind === "run") await loadRuns(pinned && pinned !== s.run_id ? pinned : s.run_id);
     wasRunning = s.running;
     if (window.profilePanel) await window.profilePanel.onState(s);
     if (window.postPanel) await window.postPanel.onState(s);
@@ -361,7 +363,7 @@ $("checkBtn").onclick = act(() => post("/api/login/check"));
 $("reBtn").onclick = act(() => post(`/api/runs/${$("runSelect").value}/reanalyze`));
 $("saveBtn").onclick = act(saveSettings);
 $("addTopic").onclick = () => document.querySelectorAll(".topic-row").length < MAX_TOPICS && $("topics").appendChild(topicRow());
-$("runSelect").onchange = (e) => loadRun(e.target.value);
+$("runSelect").onchange = (e) => { pinned = Number(e.target.value); loadRun(e.target.value); };
 $("logToggle").onclick = () => $("log").classList.toggle("hidden");
 $("logBtn").onclick = () => { logOpen = !logOpen; $("log").classList.toggle("hidden", !logOpen); refresh(); };
 
