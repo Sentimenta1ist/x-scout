@@ -23,7 +23,6 @@ BIG_ACCOUNTS = [
     "amasad", "TheHackersNews", "theo", "ThePrimeagen", "garrytan", "pmarca", "Jason",
 ]
 
-NO_SPORTS = "-NBA -NFL -NHL -MLB -WWE -UFC -FIFA -goal -touchdown -playoffs -#WWENXT"
 MAX_PICKS = {"news": 8, "big": 15, "viral": 12, "trash": 8, "more": 15}
 MORE_POOL = 40  # candidates the More call reads
 MIN_Q = 3
@@ -51,13 +50,13 @@ def queries(stage, settings, now=None):
         for i in range(0, min(len(handles), 2 * MAX_AUTHORS), MAX_AUTHORS):
             out.append(("live", f"{authors_query(handles[i:i + MAX_AUTHORS])} -filter:replies {s(3)}", 40))
         out.append(("live", f"(AI OR startup OR coding OR tech OR jobs OR founder){lo} -filter:replies filter:blue_verified min_faves:100 {s(2)}", 40))
-        # any topic: what is taking off right now, minus sports (late US evening it was mostly NBA/WWE/NHL)
-        out.append(("live", f"min_faves:300{lo} -filter:replies {NO_SPORTS} {s(2)}", 40))
+        # any topic: what is taking off right now (sports included: he likes basketball and volleyball)
+        out.append(("live", f"min_faves:300{lo} -filter:replies {s(2)}", 40))
         # the themes he replies on best, wider than the account list: tech companies, money, work, economy
         out.append(("live", f"(AI OR OpenAI OR Anthropic OR Nvidia OR Apple OR Google OR Microsoft OR Amazon OR Meta OR Tesla OR startup OR founder)"
                             f"{lo} -filter:replies min_faves:150 {s(2)}", 50))
         out.append(("live", f"(jobs OR layoffs OR hiring OR salary OR economy OR inflation OR stocks OR market OR housing OR rent OR career)"
-                            f"{lo} -filter:replies filter:blue_verified min_faves:150 {NO_SPORTS} {s(2)}", 50))
+                            f"{lo} -filter:replies filter:blue_verified min_faves:150 {s(2)}", 50))
         return out
     if stage == "viral":
         return [
@@ -210,8 +209,8 @@ SAY <a reply of 30-90 characters on the post's point, format by post type>
 SAY <another reply, a different format and angle>""",
     "more": """You write extra replies for one X account. These posts all passed his reply checks (fresh, quiet thread,
 heading to 50k+ views) but were not picked in the main tabs; some come from an earlier run and are still fresh. """ + VOICE + """
-Goal: more good reply targets, up to 15. Any topic counts (news, tech, money, work, everyday life, culture).
-Skip: sports and esports, war and attacks, tragedies and deaths, conspiracy, politics for its own sake, ads,
+Goal: more good reply targets, up to 15. Any topic counts (news, tech, money, work, everyday life, culture, sports:
+he likes basketball and volleyball). Skip: war and attacks, tragedies and deaths, conspiracy, politics for its own sake, ads,
 giveaways, crypto shilling, posts with nothing to say about, and stories in COVERED (they already have a reply today).
 Fields:
 GIST <what the post says, 1 sentence>
