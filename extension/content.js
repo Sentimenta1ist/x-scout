@@ -66,11 +66,12 @@
     box.click();
     box.focus();
     await sleep(rand(500, 1200));
-    if (box.innerText.trim()) { // leftovers from an earlier draft
-      document.execCommand("selectAll");
-      document.execCommand("delete");
-      await sleep(rand(300, 600));
-    }
+    // always, even when empty: on a fresh Draft.js editor the first insertText doubles ("s" → "ss") and every next one
+    // snowballs; one selectAll + delete first makes typing exact (checked on live X 2026-11-18). Also clears leftovers.
+    const clear = () => { document.execCommand("selectAll"); document.execCommand("delete"); };
+    clear();
+    await sleep(rand(300, 600));
+    let n = 0;
     for (const ch of draft) {
       if (!box.contains(document.activeElement) && document.activeElement !== box) {
         return report("error", { error: "focus left the reply box, typing stopped" });
@@ -78,6 +79,14 @@
       // one character per input event, like typing. No synthetic keydown/keyup: X's Draft.js editor handles those
       // itself and duplicates the text ("twtotwt...", checked 2026-11-18)
       document.execCommand(ch === "\n" ? "insertLineBreak" : "insertText", false, ch);
+      n++;
+      if (n <= 3 || n % 10 === 0) { // fuse: stop before a mismatch snowballs
+        const want = draft.slice(0, n).replace(/\s+/g, " ").trim(), have = box.innerText.replace(/\s+/g, " ").trim();
+        if (have !== want) {
+          clear();
+          return report("error", { error: `typing went wrong after ${n} chars, cleared the box`, typed: have.slice(0, 80) });
+        }
+      }
       await sleep(delay(ch));
     }
     report("waiting", { typed: box.innerText.trim() });
