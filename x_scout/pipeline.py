@@ -252,18 +252,20 @@ def _enabled(settings):
     return out
 
 
-def analyze_stage(stage, posts, trends, settings):
+def analyze_stage(stage, posts, trends, settings, extra=None):
     """One claude -p for a stage → (picks, usage). Claude failing → local fallback, the tab still fills."""
     history = stg.history_lines(*db.recent_sent()) if stage in stg.REPLY_STAGES else None
+    if extra:
+        history = (history or []) + [""] + extra
     prompt, index = stg.digest(load_profile(), posts, trends, history)
     text, usage = analyze.run_claude(prompt, model=settings["model"], system=stg.system(stage, settings["gist_lang"]), raw=True)
     _log(f"{stg.LABELS[stage]}: claude in {usage['input_tokens']} / out {usage['output_tokens']} tokens, {usage['duration_s']}s")
     return stg.assemble(stage, stg.parse(text), index), usage
 
 
-def _analyze_stage_job(run_id, stage, posts, trends, settings):
+def _analyze_stage_job(run_id, stage, posts, trends, settings, extra=None):
     try:
-        picks, usage = analyze_stage(stage, posts, trends, settings)
+        picks, usage = analyze_stage(stage, posts, trends, settings, extra)
         _stage_state(run_id, stage, status="ready", picks=picks, count=len(picks), usage=usage)
     except Exception as e:
         if analyze._stopped.is_set():
@@ -353,6 +355,22 @@ def _topics_analysis(run_id, candidates, settings):
         return None
 
 
+def _more_job(run_id, settings):
+    """More tab: replies under every post that passed the checks but wasn't picked, plus still-fresh posts of runs
+    from the last 3 h. Main tabs pick the best few; this one turns the rest into reply targets (15-20 a run)."""
+    run = db.get_run(run_id) or {}
+    stages = run.get("stages") or {}
+    picks = [p for st in ("news", "big", "trash") for p in (stages.get(st) or {}).get("picks") or []]
+    recent = [r.get("stages") or {} for r in db.recent_day_runs(hours=3, exclude=run_id)]
+    pool = stg.more_pool([stages] + recent, {p.get("id") for p in picks}, db.sent_ids())
+    _log(f"More: {len(pool)} posts passed the checks and were not picked ({len(recent)} earlier runs in the last 3 h)")
+    if not pool:
+        _stage_state(run_id, "more", status="ready", picks=[], count=0)
+        return
+    _stage_state(run_id, "more", status="analyzing", cands=pool)
+    _analyze_stage_job(run_id, "more", pool, [], settings, stg.covered_lines(picks))
+
+
 def _summary(run_id, topics_result, settings):
     src = db.get_run(run_id) or {}
     digest = stg.summary_digest(src.get("stages") or {}, topics_result)
@@ -402,6 +420,9 @@ async def run_day(settings):
                 score_posts(posts)
                 db.save_posts(posts)
                 cands = stg.select(st, posts, settings)
+                if st in stg.REPLY_STAGES:  # posts we already replied to never come back
+                    sent = db.sent_ids()
+                    cands = [p for p in cands if p["id"] not in sent]
                 _log(f"{stg.LABELS[st]}: {len(cands)} candidates of {len(posts)}" + (f", {len(trends)} trends" if trends else ""))
                 if not cands and not trends:
                     _stage_state(run_id, st, status="ready", picks=[], count=0, scraped=len(posts))
@@ -412,6 +433,9 @@ async def run_day(settings):
             stats["rate_wait_s"] = round(session.budget.waited)
         state.update(progress=round(len(order) / (len(order) + 1), 3), step="Claude is finishing the last tabs")
         await asyncio.gather(*jobs)
+        if settings.get("stages", {}).get("more", True):
+            state.update(step="Claude is writing more replies")
+            await asyncio.to_thread(_more_job, run_id, settings)
         topics_result = await topics_job if topics_job else None
         state.update(step="Claude is writing the summary")
         try:

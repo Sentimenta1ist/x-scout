@@ -125,7 +125,7 @@ def test_day_run_fills_stages_in_order(tmp_path, monkeypatch):
     asyncio.run(pipeline.run_day(settings))
     r = db.get_run(db.latest_run_id())
     assert r["kind"] == "day" and r["status"] == "done"
-    assert set(r["stages"]) == {"news", "big", "trash", "summary"}
+    assert set(r["stages"]) == {"news", "big", "trash", "more", "summary"}
     assert all(r["stages"][s]["status"] == "ready" for s in ("news", "big", "trash"))
     assert r["stages"]["summary"]["recs"] == ["do the news"]
 
@@ -156,3 +156,20 @@ def test_trash_needs_a_post_heading_somewhere_and_cards_carry_fit():
     assert [p["id"] for p in stages.select("trash", [small, rising])] == ["2"]
     cards = stages.assemble("big", [{"n": "1", "q": 4, "take": [], "say": ["x"]}], {"1": rising})
     assert cards[0]["fit"]["ok"] is False and cards[0]["fit"]["why"] == ["won't reach 50k"]
+
+
+def test_more_pool_fresh_unpicked_unsent_from_runs():
+    from datetime import datetime, timedelta, timezone
+    from x_scout.stages import covered_lines, more_pool
+    now = datetime(2026, 11, 18, 3, 0, tzinfo=timezone.utc)
+
+    def c(pid, age, views=60000, replies=10, text="a real post about something"):
+        return {"id": pid, "created_at": (now - timedelta(minutes=age)).isoformat(), "views": views,
+                "replies": replies, "text": text, "author": {"handle": "a", "followers": 100000}}
+
+    cur = {"big": {"cands": [c("1", 30), c("2", 30), c("3", 400)]}, "news": {"cands": [c("4", 60, replies=500)]}}
+    old = {"big": {"cands": [c("1", 30), c("5", 90)]}, "trash": {"cands": [c("6", 20)]}}
+    pool = more_pool([cur, old], picked_ids={"2"}, sent_ids={"6"}, now=now)
+    assert {p["id"] for p in pool} == {"1", "5"}  # 2 picked, 3 old, 4 crowded, 6 sent
+    assert all(abs(p["age_min"] - 30) < 1 or abs(p["age_min"] - 90) < 1 for p in pool)
+    assert covered_lines([{"gist": "outages"}])[0] == "COVERED:" and covered_lines([]) == []

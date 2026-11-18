@@ -237,3 +237,12 @@ def recent_sent(limit=25, edits=10):
     sent = [r["sent_text"] for r in rows]
     changed = [(r["draft"], r["sent_text"]) for r in rows if r["draft"] and r["draft"].strip() != r["sent_text"].strip()]
     return sent, changed[:edits]
+
+
+def recent_day_runs(hours=3, exclude=None):
+    """Day runs started in the last `hours`, newest first: their stored candidates can still be fresh."""
+    since = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - hours * 3600, timezone.utc).isoformat()
+    with conn() as c:
+        rows = c.execute("select id, stages from runs where kind='day' and started_at >= ? and id != ? order by id desc",
+                         (since, exclude or -1)).fetchall()
+    return [{"id": r["id"], "stages": json.loads(r["stages"]) if r["stages"] else {}} for r in rows]

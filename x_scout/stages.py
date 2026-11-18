@@ -14,7 +14,7 @@ from .parse import compact_text
 from .scoring import crowd, project_views, reply_fit, reply_value
 
 ORDER = ["news", "big", "viral", "trash", "topics"]
-LABELS = {"news": "News", "big": "Big accounts", "viral": "Viral", "trash": "Trash", "topics": "Topics"}
+LABELS = {"news": "News", "big": "Big accounts", "viral": "Viral", "trash": "Trash", "topics": "Topics", "more": "More"}
 
 # tech / AI accounts with a big audience; editable in Settings (big_accounts)
 BIG_ACCOUNTS = [
@@ -23,7 +23,9 @@ BIG_ACCOUNTS = [
     "amasad", "TheHackersNews", "theo", "ThePrimeagen", "garrytan", "pmarca", "Jason",
 ]
 
-MAX_PICKS = {"news": 8, "big": 15, "viral": 12, "trash": 8}
+NO_SPORTS = "-NBA -NFL -NHL -MLB -WWE -UFC -FIFA -goal -touchdown -playoffs -#WWENXT"
+MAX_PICKS = {"news": 8, "big": 15, "viral": 12, "trash": 8, "more": 15}
+MORE_POOL = 40  # candidates the More call reads
 MIN_Q = 3
 
 
@@ -49,8 +51,13 @@ def queries(stage, settings, now=None):
         for i in range(0, min(len(handles), 2 * MAX_AUTHORS), MAX_AUTHORS):
             out.append(("live", f"{authors_query(handles[i:i + MAX_AUTHORS])} -filter:replies {s(3)}", 40))
         out.append(("live", f"(AI OR startup OR coding OR tech OR jobs OR founder){lo} -filter:replies filter:blue_verified min_faves:100 {s(2)}", 40))
-        # any topic: what is taking off right now (news outlets, politics-free big accounts outside the list)
-        out.append(("live", f"min_faves:300{lo} -filter:replies {s(2)}", 40))
+        # any topic: what is taking off right now, minus sports (late US evening it was mostly NBA/WWE/NHL)
+        out.append(("live", f"min_faves:300{lo} -filter:replies {NO_SPORTS} {s(2)}", 40))
+        # the themes he replies on best, wider than the account list: tech companies, money, work, economy
+        out.append(("live", f"(AI OR OpenAI OR Anthropic OR Nvidia OR Apple OR Google OR Microsoft OR Amazon OR Meta OR Tesla OR startup OR founder)"
+                            f"{lo} -filter:replies min_faves:150 {s(2)}", 50))
+        out.append(("live", f"(jobs OR layoffs OR hiring OR salary OR economy OR inflation OR stocks OR market OR housing OR rent OR career)"
+                            f"{lo} -filter:replies filter:blue_verified min_faves:150 {NO_SPORTS} {s(2)}", 50))
         return out
     if stage == "viral":
         return [
@@ -201,10 +208,50 @@ These replies are for volume and goodwill: light, friendly, on the post's point.
 Fields:
 SAY <a reply of 30-90 characters on the post's point, format by post type>
 SAY <another reply, a different format and angle>""",
+    "more": """You write extra replies for one X account. These posts all passed his reply checks (fresh, quiet thread,
+heading to 50k+ views) but were not picked in the main tabs; some come from an earlier run and are still fresh. """ + VOICE + """
+Goal: more good reply targets, up to 15. Any topic counts (news, tech, money, work, everyday life, culture).
+Skip: sports and esports, war and attacks, tragedies and deaths, conspiracy, politics for its own sake, ads,
+giveaways, crypto shilling, posts with nothing to say about, and stories in COVERED (they already have a reply today).
+Fields:
+GIST <what the post says, 1 sentence>
+SAY <a reply of 30-90 characters on this exact post, format by post type>
+SAY <a second reply, a different format and angle>""",
 }
 
 
-REPLY_STAGES = ("news", "big", "trash")
+REPLY_STAGES = ("news", "big", "trash", "more")
+
+
+def more_pool(runs, picked_ids, sent_ids, now=None, limit=MORE_POOL):
+    """Posts for the More call: stored candidates of News, Big and Trash from this run and runs of the last 3 h
+    (runs = [stages dicts], newest first) that pass reply_fit with their age now, are not picked in the current run
+    and got no reply from us. Newest snapshot of a post wins. → posts sorted by reply value."""
+    now = now or datetime.now(timezone.utc)
+    out, seen = [], set(picked_ids) | set(sent_ids)
+    for stages in runs:
+        for st in ("big", "news", "trash"):
+            for p in (stages.get(st) or {}).get("cands") or []:
+                if p.get("id") in seen:
+                    continue
+                try:
+                    age = (now - datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))).total_seconds() / 60
+                except (KeyError, AttributeError, ValueError):
+                    continue
+                q = {**p, "age_min": age}
+                # stored cands are slim: rebuild the scored block that slim() and the cards need
+                q.setdefault("scored", {"score": p.get("score", 0), "label": p.get("label", ""), "parts": p.get("parts", {})})
+                if not reply_fit(q)["ok"] or is_junk(q.get("text")):
+                    continue
+                seen.add(p["id"])
+                out.append(q)
+    return sorted(out, key=lambda p: reply_value(p)["score"], reverse=True)[:limit]
+
+
+def covered_lines(picks):
+    """Stories already picked in this run's main tabs, so More doesn't reply to the same story twice."""
+    lines = [f"- {compact_text(p.get('gist') or p.get('text'), 140)}" for p in picks if p.get("gist") or p.get("text")]
+    return ["COVERED:"] + lines if lines else []
 
 
 def system(stage, gist_lang="English"):

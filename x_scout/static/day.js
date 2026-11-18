@@ -4,6 +4,7 @@
   const STAGES = [
     ["news", "News", "at most 1 own post a day; reply here only while the post is under 3h"],
     ["big", "Big accounts", "the main source: reply while the post is under 3h and the thread is quiet"],
+    ["more", "More", "every other post that passed the checks, also still-fresh ones from earlier runs"],
     ["viral", "Viral", "formats to learn from, too old to reply under"],
     ["trash", "Trash", "replies under smaller posts that are taking off, stay under the limit"],
     ["topics", "Topics", "what survived your topics"],
@@ -14,9 +15,10 @@
     big: [["say", "say"], ["ask", "ask"]],
     viral: [["grok", "grok"], ["rewrite", "yours"], ["opposite", "quote"], ["opinion", "topic"]],
     trash: [["say", "say"]],
+    more: [["say", "say"]],
   };
   // the three checks before a reply (scoring.reply_fit); age is recomputed from created_at: a card cools while you read
-  const REPLY_STAGES = new Set(["news", "big", "trash"]);
+  const REPLY_STAGES = new Set(["news", "big", "trash", "more"]);
   const ageNow = (p) => p.created_at ? (Date.now() - Date.parse(p.created_at)) / 60000 : p.age_min;
   function coldWhy(p) {
     if (p.trend) return [];
@@ -134,32 +136,35 @@
     el.querySelectorAll(".freplies li").forEach((li, i) => {
       li.appendChild(copyBtn(shown[i][1]));
       if (REPLY_STAGES.has(p.stage) && !p.trend && isReply(shown[i])) li.appendChild(typeBtn(p, li));
+      else if (shown[i][0] === "post") li.appendChild(typeBtn(p, li, true));
     });
     el.querySelector(".fmeta-row").insertBefore(box(key), el.querySelector(".fopen"));
     return el;
   }
 
   // ---- type: the draft (edited in place) is typed into X key by key, the owner presses Reply ----
-  const TYPE_LABEL = { queued: "opening…", typing: "typing…", waiting: "press Reply in that tab", sent: "sent ✓", already: "already replied ✓", error: "failed" };
+  const TYPE_LABEL = { queued: "opening…", typing: "typing…", waiting: "press Reply / Post in that tab", sent: "sent ✓", already: "already replied ✓", error: "failed" };
   let typing = null;  // {key, status}
 
-  function typeBtn(p, li) {
+  function typeBtn(p, li, own = false) {
     const t = li.querySelector(".ftext");
     t.contentEditable = "plaintext-only";
     t.spellcheck = false;
     t.title = "Edit before typing";
     const b = document.createElement("button");
     b.className = "ftype";
-    b.textContent = typing && typing.key === p.key ? (TYPE_LABEL[typing.status] || "type") : "type";
+    b.textContent = typing && typing.key === (own ? `${p.key}:post` : p.key) ? (TYPE_LABEL[typing.status] || "type") : "type";
     b.title = "Opens the post in a new tab; the x-scout typer extension types this draft, you press Reply";
     b.onclick = async (e) => {
       e.stopPropagation();
       const tab = window.open("about:blank", "_blank");  // opened inside the click, so it is not blocked as a popup
       try {
-        const r = await post("/api/type", { run_id: current.id, id: p.id, url: p.url, key: p.key, stage: p.stage,
-                                            author: p.author.handle, draft: t.innerText.trim() });
-        tab.location = r.url + "#xscout";
-        typing = { key: p.key, status: "queued" };
+        const id = own ? `p${p.id || Date.now()}` : p.id;  // own post: compose window, not a reply
+        const r = await post("/api/type", { run_id: current.id, id, url: own ? "https://x.com/compose/post" : p.url,
+                                            key: own ? `${p.key}:post` : p.key, stage: p.stage,
+                                            author: p.author ? p.author.handle : null, draft: t.innerText.trim() });
+        tab.location = own ? `${r.url}#xscout=${id}` : r.url + "#xscout";
+        typing = { key: own ? `${p.key}:post` : p.key, status: "queued" };
         b.textContent = TYPE_LABEL.queued;
         pollType(b, Date.now());
       } catch (err) { tab && tab.close(); b.textContent = "failed"; b.title = String(err); }
@@ -228,8 +233,8 @@
     const st = run.stages || {};
     const limit = (window.settingsCache || {}).trash_limit || 3;
     const out = [];
-    const replies = ["big", "trash", "news"].reduce((n, s) => n + doneIn(s).length, 0);
-    out.push({ label: "Replies in sessions of 8–10, each under a post < 3h with a quiet thread", have: replies, need: 8 });
+    const replies = ["big", "more", "trash", "news"].reduce((n, s) => n + doneIn(s).length, 0);
+    out.push({ label: "15–20 replies a run, each under a post < 3h with a quiet thread", have: replies, need: 15 });
     if (st.big) out.push({ label: "From Big accounts", have: doneIn("big").length, need: 5, who: names("big") });
     if (st.trash) out.push({ label: `Trash replies, up to ${limit}`, have: doneIn("trash").length, need: Math.min(2, limit), max: limit, who: names("trash") });
     out.push({ label: "At most 1 own post today (quote only on a big-event day)", key: "m:post" });
