@@ -140,8 +140,8 @@
   }
 
   // ---- type: the draft (edited in place) is typed into X key by key, the owner presses Reply ----
-  const TYPE_LABEL = { opening: "opening…", login: "log in to X in that window, then type again", typing: "typing…", waiting: "press Reply in Chrome", sent: "sent ✓", already: "already replied ✓", error: "failed" };
-  let typing = null;  // {key, btn}
+  const TYPE_LABEL = { queued: "opening…", typing: "typing…", waiting: "press Reply in that tab", sent: "sent ✓", already: "already replied ✓", error: "failed" };
+  let typing = null;  // {key, status}
 
   function typeBtn(p, li) {
     const t = li.querySelector(".ftext");
@@ -151,34 +151,37 @@
     const b = document.createElement("button");
     b.className = "ftype";
     b.textContent = typing && typing.key === p.key ? (TYPE_LABEL[typing.status] || "type") : "type";
-    b.title = "Type into X key by key; you press Reply";
+    b.title = "Opens the post in a new tab; the x-scout typer extension types this draft, you press Reply";
     b.onclick = async (e) => {
       e.stopPropagation();
+      const tab = window.open("about:blank", "_blank");  // opened inside the click, so it is not blocked as a popup
       try {
-        await post("/api/type", { run_id: current.id, id: p.id, url: p.url, key: p.key, stage: p.stage,
-                                  author: p.author.handle, draft: t.innerText.trim() });
-        typing = { key: p.key, status: "opening" };
-        b.textContent = TYPE_LABEL.opening;
-        pollType(b);
-      } catch (err) { b.textContent = "busy"; b.title = String(err); }
+        const r = await post("/api/type", { run_id: current.id, id: p.id, url: p.url, key: p.key, stage: p.stage,
+                                            author: p.author.handle, draft: t.innerText.trim() });
+        tab.location = r.url + "#xscout";
+        typing = { key: p.key, status: "queued" };
+        b.textContent = TYPE_LABEL.queued;
+        pollType(b, Date.now());
+      } catch (err) { tab && tab.close(); b.textContent = "failed"; b.title = String(err); }
     };
     return b;
   }
 
-  async function pollType(b) {
+  async function pollType(b, t0) {
     let s;
     try { s = await api("/api/type"); } catch { return; }
     typing = { key: s.key, status: s.status };
     b.textContent = TYPE_LABEL[s.status] || "type";
     if (s.error) b.title = s.error;
-    if (s.status === "waiting" && s.exact === false) { b.textContent = "check the text in Chrome"; b.title = `in the box: ${s.typed || ""}`; }
+    if (s.status === "waiting" && s.exact === false) { b.textContent = "check the text in that tab"; b.title = `in the box: ${s.typed || ""}`; }
+    if (s.status === "queued" && Date.now() - t0 > 30000) { b.textContent = "no extension?"; b.title = "Load extension/ in chrome://extensions (Load unpacked)"; return; }
     if (s.status === "sent" || s.status === "already") {
       current.checks = (await api(`/api/runs/${current.id}`)).checks;
       typing = null;
       window.renderBoard();
       return;
     }
-    if (!["error", "idle", "login"].includes(s.status)) setTimeout(() => pollType(b), 1500);
+    if (s.status !== "error" && Date.now() - t0 < 20 * 60000) setTimeout(() => pollType(b, t0), 1500);
   }
 
   function renderStage(run, stage) {

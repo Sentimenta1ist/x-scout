@@ -132,22 +132,40 @@ async def reanalyze(run_id: int):
 
 
 @app.post("/api/type")
-async def type_reply(body: dict = Body(...)):
-    """Type a reply draft into X key by key; the owner presses Reply himself. Own Chrome profile: fine during a Run."""
-    if typer.state.get("status") in ("opening", "typing"):
-        raise HTTPException(409, "still typing the previous one")
+def type_reply(body: dict = Body(...)):
+    """Queue a reply draft for the extension; the page then opens the post in a new tab of the owner's Chrome."""
     item = {k: body.get(k) for k in ("run_id", "id", "url", "key", "stage", "author", "draft")}
     if not item["id"] or not (item["draft"] or "").strip():
         raise HTTPException(400, "id and draft are required")
     item["draft"] = item["draft"].strip()
     item["url"] = item["url"] or f"https://x.com/i/status/{item['id']}"
-    _spawn(typer.type_reply(item, pipeline.load_settings().get("own_handle")))
-    return {"ok": True}
+    item["own_handle"] = (pipeline.load_settings().get("own_handle") or "").lstrip("@")
+    typer.queue(item)
+    return {"ok": True, "url": item["url"]}
 
 
 @app.get("/api/type")
 def type_state():
     return typer.state
+
+
+@app.get("/api/type/next/{post_id}")
+def type_next(post_id: str):
+    it = typer.take(post_id)
+    if not it:
+        raise HTTPException(404, "nothing queued for this post")
+    return {k: it[k] for k in ("id", "draft", "own_handle")}
+
+
+@app.post("/api/type/status")
+def type_status(body: dict = Body(...)):
+    typer.report(str(body.get("id") or ""), body.get("status"), body.get("typed"), body.get("error"))
+    return {"ok": True}
+
+
+@app.post("/api/type/sent")
+def type_sent(body: dict = Body(...)):
+    return {"ok": typer.sent(str(body.get("id") or ""), body.get("text") or "")}
 
 
 @app.get("/api/sent")

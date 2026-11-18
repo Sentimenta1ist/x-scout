@@ -1,34 +1,34 @@
-import json
-import random
-
-from x_scout.typer import key_delays, own_reply, sent_from_request
+from x_scout import typer as typer_mod
 
 
-def test_delays_bounds_and_punctuation():
-    d = key_delays("a" * 200, random.Random(1))
-    assert len(d) == 200 and all(0.04 <= x <= 0.13 + 1.6 for x in d)
-    assert sum(x < 0.131 for x in d) > 180  # thinking pauses are rare
-    assert key_delays("a.a.", random.Random(2))[1] > key_delays("aaaa", random.Random(2))[1]
+def _typer(monkeypatch):
+    calls = []
+    monkeypatch.setattr(typer_mod.db, "log_sent", lambda *a, **k: calls.append(("log", a)))
+    monkeypatch.setattr(typer_mod.db, "set_check", lambda *a, **k: calls.append(("check", a)))
+    return typer_mod.Typer(), calls
 
 
-def test_sent_from_request():
-    body = json.dumps({"variables": {"tweet_text": "ok then", "reply": {"in_reply_to_tweet_id": "42"}}})
-    assert sent_from_request(body) == ("ok then", "42")
-    assert sent_from_request("not json") == (None, None)
+ITEM = {"run_id": 1, "id": "42", "key": "big:42", "draft": "hello there", "own_handle": "me"}
 
 
-def _tweet(rid, reply_to, name, new_schema=True):
-    user = {"core": {"screen_name": name}} if new_schema else {"legacy": {"screen_name": name}}
-    return {"rest_id": rid, "core": {"user_results": {"result": user}},
-            "legacy": {"in_reply_to_status_id_str": reply_to, "full_text": "x"}}
+def test_queue_take_and_sent(monkeypatch):
+    t, calls = _typer(monkeypatch)
+    t.queue(dict(ITEM))
+    assert t.state["status"] == "queued" and t.take("42")["draft"] == "hello there"
+    t.report("42", "waiting", typed="hello there")
+    assert t.state["exact"] is True
+    assert t.sent("42", "hello there!") is True
+    assert t.state["status"] == "sent" and t.take("42") is None
+    assert calls[0][1][2] == "hello there!" and calls[1] == ("check", (1, "big:42", True))
+    assert t.sent("42", "again") is False
 
 
-def test_own_reply_found_in_nested_payload():
-    payload = {"data": {"threaded_conversation_with_injections_v2": {"instructions": [{"entries": [
-        {"content": {"itemContent": {"tweet_results": {"result": _tweet("1", None, "author")}}}},
-        {"content": {"items": [{"item": {"itemContent": {"tweet_results": {"result": _tweet("7", "1", "SentimentGod", False)}}}}]}},
-    ]}]}}}
-    assert own_reply([payload], "1", "@sentimentGod") == "7"
-    assert own_reply([payload], "1", "someoneelse") is None
-    assert own_reply([payload], "2", "sentimentGod") is None
-    assert own_reply([payload], "1", "") is None
+def test_already_and_mismatch(monkeypatch):
+    t, calls = _typer(monkeypatch)
+    t.queue(dict(ITEM))
+    t.report("42", "waiting", typed="бу hello there")
+    assert t.state["exact"] is False
+    t.report("42", "already")
+    assert t.take("42") is None and calls[0][1][3] == "already"
+    t.report("42", "bogus")
+    assert t.state["status"] == "already"

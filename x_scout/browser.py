@@ -41,9 +41,9 @@ def _chrome_ua():
         return None
 
 
-async def _context(pw, headless, profile=None, **extra):
-    kwargs = dict(**extra,
-        user_data_dir=str(profile or BROWSER_PROFILE),
+async def _context(pw, headless):
+    kwargs = dict(
+        user_data_dir=str(BROWSER_PROFILE),
         channel="chrome",
         headless=headless,
         viewport={"width": 1280, "height": 900},
