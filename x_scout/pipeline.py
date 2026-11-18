@@ -360,7 +360,7 @@ def _more_job(run_id, settings):
     from the last 3 h. Main tabs pick the best few; this one turns the rest into reply targets (25-30 a run)."""
     run = db.get_run(run_id) or {}
     stages = run.get("stages") or {}
-    picks = [p for st in ("news", "big", "trash") for p in (stages.get(st) or {}).get("picks") or []]
+    picks = [p for st in ("feed", "news", "big", "trash") for p in (stages.get(st) or {}).get("picks") or []]
     recent = [r.get("stages") or {} for r in db.recent_day_runs(hours=3, exclude=run_id)]
     pool = stg.more_pool([stages] + recent, {p.get("id") for p in picks}, db.sent_ids())
     _log(f"More: {len(pool)} posts passed the checks and were not picked ({len(recent)} earlier runs in the last 3 h)")
@@ -378,6 +378,73 @@ def _summary(run_id, topics_result, settings):
         return None, None
     text, usage = analyze.run_claude(digest, model=settings["model"], system=stg.SUMMARY_SYSTEM.replace("{gist_lang}", settings["gist_lang"]), raw=True)
     return stg.parse_summary(text), usage
+
+
+# ---- feed: posts he scrolls past in his own Chrome, sent by x-viral-radar (POST /api/feed); in memory, last 3 h ----
+FEED = {}  # post id -> post (x-scout shape)
+FEED_KEEP_S = 3 * 3600
+
+
+def feed_add(raw):
+    """Radar records → x-scout posts in FEED; newer counters win. → number of posts kept."""
+    now = time.time()
+    for r in raw or []:
+        pid, handle = str(r.get("id") or ""), (r.get("handle") or "").lstrip("@")
+        if not pid.isdigit() or not handle or not r.get("created"):
+            continue
+        FEED[pid] = {
+            "id": pid, "url": f"https://x.com/{handle}/status/{pid}", "text": (r.get("text") or "")[:1200], "lang": None,
+            "created_at": datetime.fromtimestamp(r["created"] / 1000, timezone.utc).isoformat(),
+            "author": {"handle": handle, "name": r.get("name") or handle, "followers": None, "verified": False},
+            "views": r.get("views"), "likes": r.get("likes") or 0, "replies": r.get("replies") or 0,
+            "reposts": r.get("reposts") or 0, "quotes": 0, "bookmarks": r.get("bookmarks") or 0,
+            "is_reply": False, "media": [], "quoted": None, "found_in": "feed", "_got": now,
+        }
+    for pid in [k for k, v in FEED.items() if now - v["_got"] > FEED_KEEP_S]:
+        del FEED[pid]
+    return len(FEED)
+
+
+def feed_cands():
+    """FEED posts that pass the reply checks now and got no reply from us, best first."""
+    posts = score_posts([{k: v for k, v in p.items() if k != "_got"} for p in FEED.values()])
+    sent = db.sent_ids()
+    return stg.select("feed", [p for p in posts if p["id"] not in sent])
+
+
+def _feed_job(run_id, settings, cands):
+    if not cands:
+        _stage_state(run_id, "feed", status="ready", picks=[], count=0, scraped=len(FEED))
+        return
+    _stage_state(run_id, "feed", status="analyzing", scraped=len(FEED), cands=[analyze.slim(p) for p in cands])
+    _analyze_stage_job(run_id, "feed", cands, [], settings)
+
+
+async def run_feed(settings):
+    """From feed: one Claude call over what he scrolled past, no X search. ~1 min."""
+    global _task
+    _task = asyncio.current_task()
+    analyze._stopped.clear()
+    state.update(running=True, kind="run", step="Claude is reading your feed", log=[], progress=0.3, eta_s=90, started=time.time(), stages={})
+    run_id = db.create_run([])
+    db.set_kind(run_id, "day")
+    state["run_id"] = run_id
+    t0 = time.time()
+    try:
+        cands = feed_cands()
+        _log(f"Feed: {len(cands)} of {len(FEED)} scrolled posts pass the reply checks")
+        _stage_state(run_id, "feed", status="waiting")
+        await asyncio.to_thread(_feed_job, run_id, settings, cands)
+        db.finish_run(run_id, "done", None, {"stages": ["feed"], "total_s": round(time.time() - t0)})
+        _log("done")
+    except asyncio.CancelledError:
+        analyze.stop_claude()
+        db.finish_run(run_id, "stopped", stats={"error": "stopped"})
+    except Exception as e:
+        _log(f"error: {e!r}")
+        db.finish_run(run_id, "error", stats={"error": str(e)[:500]})
+    finally:
+        state.update(running=False, step="", progress=1.0)
 
 
 def _day_eta(settings):
@@ -404,6 +471,11 @@ async def run_day(settings):
     for st in order:
         _stage_state(run_id, st, status="waiting")
     jobs, topics_job = [], None
+    feed = feed_cands() if FEED else []
+    if feed:  # what he scrolled past: analyzed right away, while X is searched
+        _log(f"Feed: {len(feed)} of {len(FEED)} scrolled posts pass the reply checks")
+        _stage_state(run_id, "feed", status="waiting")
+        jobs.append(asyncio.create_task(asyncio.to_thread(_feed_job, run_id, settings, feed)))
     try:
         pause = tuple(settings.get("search_pause") or (10, 20))
         on_wait = lambda left: state.update(step=f"waiting for X search limit reset, {int(left // 60)}m {int(left % 60):02d}s left")

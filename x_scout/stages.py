@@ -14,7 +14,7 @@ from .parse import compact_text
 from .scoring import crowd, project_views, reply_fit, reply_value
 
 ORDER = ["news", "big", "viral", "trash", "topics"]
-LABELS = {"news": "News", "big": "Big accounts", "viral": "Viral", "trash": "Trash", "topics": "Topics", "more": "More"}
+LABELS = {"news": "News", "big": "Big accounts", "viral": "Viral", "trash": "Trash", "topics": "Topics", "more": "More", "feed": "Feed"}
 
 # tech / AI accounts with a big audience; editable in Settings (big_accounts)
 BIG_ACCOUNTS = [
@@ -23,7 +23,7 @@ BIG_ACCOUNTS = [
     "amasad", "TheHackersNews", "theo", "ThePrimeagen", "garrytan", "pmarca", "Jason",
 ]
 
-MAX_PICKS = {"news": 8, "big": 20, "viral": 12, "trash": 10, "more": 25}
+MAX_PICKS = {"news": 8, "big": 20, "viral": 12, "trash": 10, "more": 25, "feed": 30}
 MORE_POOL = 60  # candidates the More call reads
 MIN_Q = 3
 # own posts get 10-20 views, replies are the growth: at most this many own-post drafts per stage, best pick first
@@ -118,6 +118,10 @@ def select(stage, posts, settings=None):
     if stage == "viral":
         pool = [p for p in _clean(posts, 48 * 60) if (p.get("likes") or 0) >= 1000 or (p.get("views") or 0) >= 100_000]
         return sorted(pool, key=lambda p: p.get("likes") or 0, reverse=True)[:50]
+    if stage == "feed":
+        # his own For You feed (x-viral-radar sends what he scrolls past): the feed already did the picking, only the reply checks
+        pool = [p for p in _clean(posts, 180) if reply_fit(p)["ok"]]
+        return sorted(pool, key=lambda p: (_reply(p), _velocity(p)), reverse=True)[:60]
     if stage == "trash":
         # small posts are dead ends: under posts that ended below 50k views 1 reply in 90 reached 1k (own data 2026-11)
         pool = [p for p in _clean(posts, 120) if 1000 <= (p["author"].get("followers") or 0) <= 200_000 and (p.get("replies") or 0) <= 40
@@ -214,6 +218,16 @@ These replies are for volume and goodwill: light, friendly, on the post's point.
 Fields:
 SAY <a reply of 30-90 characters on the post's point, format by post type>
 SAY <another reply, a different format and angle>""",
+    "feed": """You write replies for one X account under posts from his own For You feed: he scrolled past them in the last
+minutes and they passed his reply checks (fresh, quiet thread, heading to 50k+ views). """ + VOICE + """
+Goal: as many good reply targets as the feed has, up to 30. Any topic counts (news, tech, money, work, everyday life, culture,
+sports: he likes basketball and volleyball). Skip: war and attacks, tragedies and deaths, conspiracy, politics for its own sake,
+ads, giveaways, crypto shilling, posts with nothing to say about. One story, one reply: merge posts about the same story.
+Follower counts are unknown here (shown as ?).
+Fields:
+GIST <what the post says, 1 sentence>
+SAY <a reply of 30-90 characters on this exact post, format by post type>
+SAY <a second reply, a different format and angle>""",
     "more": """You write extra replies for one X account. These posts all passed his reply checks (fresh, quiet thread,
 heading to 50k+ views) but were not picked in the main tabs; some come from an earlier run and are still fresh. """ + VOICE + """
 Goal: more good reply targets, up to 25. Any topic counts (news, tech, money, work, everyday life, culture, sports:
@@ -226,7 +240,7 @@ SAY <a second reply, a different format and angle>""",
 }
 
 
-REPLY_STAGES = ("news", "big", "trash", "more")
+REPLY_STAGES = ("news", "big", "trash", "more", "feed")
 
 
 def more_pool(runs, picked_ids, sent_ids, now=None, limit=MORE_POOL):

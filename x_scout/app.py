@@ -111,6 +111,24 @@ async def start_run():
     return {"ok": True}
 
 
+@app.post("/api/feed")
+def feed_in(body: dict = Body(...)):
+    """x-viral-radar sends fresh posts he scrolls past in his own Chrome."""
+    return {"ok": True, "kept": pipeline.feed_add(body.get("posts"))}
+
+
+@app.get("/api/feed")
+def feed_state():
+    return {"kept": len(pipeline.FEED), "fit": len(pipeline.feed_cands()) if pipeline.FEED else 0}
+
+
+@app.post("/api/feed/run")
+async def feed_run():
+    _busy()
+    _spawn(pipeline.run_feed(pipeline.load_settings()))
+    return {"ok": True}
+
+
 @app.post("/api/stop")
 async def stop_run():
     if not pipeline.stop():

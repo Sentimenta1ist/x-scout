@@ -246,7 +246,13 @@ async function refresh() {
                 checking: ["X: checking…", ""], unknown: ["X: press Check", ""] }[s.login] || ["X: ?", ""];
     pill.textContent = L[0]; pill.className = "pill " + L[1];
     const busy = s.running || s.login === "waiting" || s.login === "checking";
-    ["runBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
+    ["runBtn", "feedBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
+    $("feedBtn").classList.toggle("hidden", s.running);
+    if (!s.running) api("/api/feed").then((f) => {
+      $("feedBtn").textContent = f.kept ? `From feed · ${f.fit}` : "From feed";
+      $("feedBtn").title = f.kept ? `${f.kept} posts scrolled in the last 3 h, ${f.fit} pass the reply checks now. No X search, about a minute`
+                                  : "Scroll your For You feed with X Viral Radar on: the posts land here";
+    }).catch(() => {});
     $("reBtn").disabled = busy || !(current && current.has_candidates);
     $("runBtn").classList.toggle("hidden", s.running);
     $("stopBtn").classList.toggle("hidden", !s.running);
@@ -356,6 +362,7 @@ for (const [view, [, nav, ic, label]] of Object.entries(VIEWS)) {
 try { setView(localStorage.getItem("view") || "feed"); } catch { setView("feed"); }
 
 const act = (fn) => async () => { try { await fn(); } catch (e) { alert(e.message); } refresh(); };
+$("feedBtn").onclick = act(() => { pinned = null; return post("/api/feed/run"); });
 $("runBtn").onclick = act(() => { pinned = null; return post("/api/run"); });  // a new run is followed again
 $("stopBtn").onclick = act(() => post("/api/stop"));
 $("loginBtn").onclick = act(() => post("/api/login"));

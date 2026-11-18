@@ -183,3 +183,19 @@ def test_more_pool_fresh_unpicked_unsent_from_runs():
     assert {p["id"] for p in pool} == {"1", "5"}  # 2 picked, 3 old, 4 crowded, 6 sent
     assert all(abs(p["age_min"] - 30) < 1 or abs(p["age_min"] - 90) < 1 for p in pool)
     assert covered_lines([{"gist": "outages"}])[0] == "COVERED:" and covered_lines([]) == []
+
+
+def test_feed_posts_from_radar_go_through_the_reply_checks():
+    import time as _t
+    from x_scout import pipeline
+    pipeline.FEED.clear()
+    now_ms = _t.time() * 1000
+    kept = pipeline.feed_add([
+        {"id": "11", "handle": "a", "created": now_ms - 40 * 60000, "text": "fresh post taking off fast", "views": 30000, "replies": 5, "likes": 900},
+        {"id": "12", "handle": "b", "created": now_ms - 5 * 3600000, "text": "old post from this morning", "views": 900000, "replies": 50},
+        {"id": "x", "handle": "c", "created": now_ms, "text": "bad id"},
+    ])
+    assert kept == 2 and pipeline.FEED["11"]["url"] == "https://x.com/a/status/11"
+    posts = pipeline.score_posts([{k: v for k, v in p.items() if k != "_got"} for p in pipeline.FEED.values()])
+    assert [p["id"] for p in stages.select("feed", posts)] == ["11"]
+    pipeline.FEED.clear()

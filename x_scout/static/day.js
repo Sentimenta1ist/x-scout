@@ -7,6 +7,7 @@
     ["posts", "Posts", "3-4 own posts for today"],
   ];
   const STAGES = [
+    ["feed", "Feed", "posts you scrolled past in your For You feed (X Viral Radar), checked and drafted"],
     ["news", "News", "replies under the hottest stories while the post is under 3h; at most 1 own post a day"],
     ["big", "Big accounts", "the main source: reply while the post is under 3h and the thread is quiet"],
     ["more", "More", "every other post that passed the checks, also still-fresh ones from earlier runs"],
@@ -21,9 +22,10 @@
     viral: [["grok", "grok"], ["rewrite", "post"], ["opposite", "quote"], ["opinion", "topic"]],
     trash: [["say", "say"]],
     more: [["say", "say"]],
+    feed: [["say", "say"]],
   };
   // the three checks before a reply (scoring.reply_fit); age is recomputed from created_at: a card cools while you read
-  const REPLY_STAGES = new Set(["news", "big", "trash", "more"]);
+  const REPLY_STAGES = new Set(["feed", "news", "big", "trash", "more"]);
   const ageNow = (p) => p.created_at ? (Date.now() - Date.parse(p.created_at)) / 60000 : p.age_min;
   function coldWhy(p) {
     if (p.trend) return [];
@@ -76,7 +78,7 @@
       const cnt = k === "replies" ? `<span class="count">${queue(run).filter((p) => !coldWhy(p).length).length}</span>`
                 : k === "posts" ? `<span class="count">${ownPosts(run).length}</span>` : status(st[k]);
       b.innerHTML = `${label}${cnt}${done ? `<span class="dn">✓${done}</span>` : ""}`;
-      b.className = (k === active ? "active" : "") + (k === "news" ? " sfirst" : "") + (isQ ? "" : " sdetail");
+      b.className = (k === active ? "active" : "") + (k === stages[0][0] ? " sfirst" : "") + (isQ ? "" : " sdetail");
       b.onclick = () => { active = k; window.renderBoard(); };
       nav.appendChild(b);
     }
@@ -101,7 +103,7 @@
   // every reply card of the reply stages, one per post, fresh ones first in stage order (News, Big, More, Trash)
   function queue(run) {
     const st = run.stages || {}, seen = new Set(), out = [];
-    for (const s of ["news", "big", "more", "trash"]) {
+    for (const s of ["feed", "news", "big", "more", "trash"]) {
       for (const p of (st[s] || {}).picks || []) {
         if (p.trend || !(p.say && p.say.length || p.ask) || seen.has(p.id)) continue;
         seen.add(p.id);
@@ -149,7 +151,7 @@
       url = `https://x.com/search?q=${encodeURIComponent(p.trend.name)}&src=trend_click`;
     } else {
       const name = (p.author.name || p.author.handle).replace(/\s*\(.*?\)\s*/g, " ").trim();
-      meta = [`<b>${esc(name)}</b>`, `@${esc(p.author.handle)}`, `${k(p.author.followers)} followers`, `${age(ageNow(p))} ago`,
+      meta = [`<b>${esc(name)}</b>`, `@${esc(p.author.handle)}`, p.author.followers != null ? `${k(p.author.followers)} followers` : "", `${age(ageNow(p))} ago`,
               `${k(p.views)} views`, `${k(p.replies)} replies`, p.fit ? `${p.fit.crowd}/10k` : ""].filter(Boolean).join(" · ");
       url = p.url;
     }
@@ -285,7 +287,7 @@
     const st = run.stages || {};
     const limit = (window.settingsCache || {}).trash_limit || 3;
     const out = [];
-    const replies = ["big", "more", "trash", "news"].reduce((n, s) => n + doneIn(s).filter((k) => !k.endsWith(":post")).length, 0);
+    const replies = ["feed", "big", "more", "trash", "news"].reduce((n, s) => n + doneIn(s).filter((k) => !k.endsWith(":post")).length, 0);
     out.push({ label: "25–30 replies a run, each under a post < 3h with a quiet thread", have: replies, need: 25 });
     if (st.big) out.push({ label: "From Big accounts", have: doneIn("big").length, need: 5, who: names("big") });
     if (st.trash) out.push({ label: `Trash replies, up to ${limit}`, have: doneIn("trash").length, need: Math.min(2, limit), max: limit, who: names("trash") });
