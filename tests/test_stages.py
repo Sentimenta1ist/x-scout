@@ -185,9 +185,11 @@ def test_more_pool_fresh_unpicked_unsent_from_runs():
     assert covered_lines([{"gist": "outages"}])[0] == "COVERED:" and covered_lines([]) == []
 
 
-def test_feed_posts_from_radar_go_through_the_reply_checks():
+def test_feed_posts_from_radar_go_through_the_reply_checks(monkeypatch):
     import time as _t
-    from x_scout import pipeline
+    from x_scout import db, pipeline
+    monkeypatch.setattr(db, "author_history", lambda *a, **k: [])  # no real db in tests (CI has none)
+    monkeypatch.setattr(db, "last_snapshot", lambda *a, **k: None)
     pipeline.FEED.clear()
     now_ms = _t.time() * 1000
     kept = pipeline.feed_add([
