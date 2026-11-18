@@ -1,4 +1,4 @@
-// x-scout typer. Runs only on a tab x-scout opened (#xscout in the URL): takes the queued draft for this post, types it
+// x-scout typer, page world (see bridge.js). Runs only on a tab x-scout opened (#xscout in the URL): takes the queued draft for this post, types it
 // into the reply box one key at a time and leaves it there. You read it and press Reply. Nothing here clicks Reply.
 (() => {
   if (location.hash !== "#xscout") return;
@@ -11,7 +11,18 @@
   const SEND = '[data-testid="tweetButtonInline"], [data-testid="tweetButton"]';
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const rand = (a, b) => a + Math.random() * (b - a);
-  const api = (path, body) => new Promise((res) => chrome.runtime.sendMessage({ path, body }, (r) => res(r || { ok: false })));
+  // page world: x-scout is reached through bridge.js (isolated world) by postMessage
+  let reqN = 0;
+  const api = (path, body) => new Promise((res) => {
+    const req = `${id}:${++reqN}`;
+    const on = (e) => {
+      if (e.source !== window || !e.data || e.data.xs !== "api-res" || e.data.req !== req) return;
+      window.removeEventListener("message", on);
+      res(e.data.res);
+    };
+    window.addEventListener("message", on);
+    window.postMessage({ xs: "api", req, path, body }, location.origin);
+  });
   const report = (status, extra = {}) => api("/api/type/status", { id, status, ...extra });
 
   // pause after a character, ms: 40-130, longer after spaces and punctuation, a rare long "thinking" pause
