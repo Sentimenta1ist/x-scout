@@ -149,7 +149,7 @@
     t.spellcheck = false;
     t.title = "Edit before typing";
     const b = document.createElement("button");
-    b.className = "link ftype";
+    b.className = "ftype";
     b.textContent = typing && typing.key === p.key ? (TYPE_LABEL[typing.status] || "type") : "type";
     b.title = "Type into X key by key; you press Reply";
     b.onclick = async (e) => {

@@ -349,7 +349,9 @@ body { display: flex; min-height: 100vh; }
 .freplies li:hover .fcopy, .fcopy:focus-visible { opacity: 1; }
 .fcopy .ic { width: 14px; height: 14px; }
 .fcopy.copied { color: var(--good); opacity: 1; }
-.ftype { flex: none; font-size: 12px; color: var(--accent); white-space: nowrap; }
+.freplies .ftype { flex: none; margin-left: auto; padding: 2px 10px; border: 1px solid var(--accent); border-radius: 999px;
+  background: transparent; color: var(--accent); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; opacity: 1; }
+.freplies .ftype:hover { background: var(--accent); color: var(--panel, #fff); }
 .freplies .ftext[contenteditable] { outline: none; border-radius: 4px; }
 .freplies .ftext[contenteditable]:focus { box-shadow: 0 0 0 1px var(--line); }
 @media (hover: none) { .fcopy { opacity: .7; } }
