@@ -26,6 +26,9 @@ BIG_ACCOUNTS = [
 MAX_PICKS = {"news": 8, "big": 15, "viral": 12, "trash": 8, "more": 15}
 MORE_POOL = 40  # candidates the More call reads
 MIN_Q = 3
+# own posts get 10-20 views, replies are the growth: at most this many own-post drafts per stage, best pick first
+OWN_POST_FIELDS = {"news": ("take",), "viral": ("rewrite", "opposite")}
+MAX_OWN_POSTS = 1
 
 
 def _since(hours, now=None):
@@ -168,19 +171,20 @@ no links, no emojis, no "great post". Every reply (SAY, ASK) is 30-90 characters
 a bare reaction ("clean diagram", "of course") gets nothing. Never the same line as a reply and as a quote."""
 
 PROMPTS = {
-    "news": """You pick today's hottest news for one X account and write post drafts on them. """ + VOICE + """
+    "news": """You pick today's hottest news for one X account and write replies under them. """ + VOICE + """
+His growth comes from replies; his own posts get 10-20 views, so replies are the job here, own posts almost never.
 Also given: trends from X Explore as lines t<k>|name|context|meta; a trend can be a pick too (P t<k> <q>).
 Pick up to 8 news items that everyone is talking about now (tech and AI first, but any big story with a fear, money or
-"what happens to us" angle counts). Merge duplicates: one pick per story, the best post for it.
+"what happens to us" angle counts). Merge duplicates: one pick per story, the post for it where a reply still gets seen
+(the freshest with a quiet thread and a large to_come).
 Fields:
 GIST <what happened, 1-2 sentences, keep names and numbers>
 CONTEXT <what led to it, for someone who missed it; only what you know for sure>
-WHY <why it is hot and why a post on it can travel today, max 20 words>
-SAY <a reply under this post, 30-90 characters (only if the post is under 3h old with a quiet thread; else omit)>
-SAY <a second reply in a different format (same condition)>
-TAKE <a post draft, under 200 characters: a hot take, a fear angle or a question that begs replies>
-TAKE <a second draft with a different angle>
-TAKE <a third, optional>""",
+WHY <why replying here is worth it now, max 20 words>
+SAY <a reply under this post, 30-90 characters, format by post type>
+SAY <a second reply in a different format and angle>
+TAKE <an own post draft, under 200 characters. At most ONE TAKE in the whole output, only on the single biggest story
+  of the day, and only if it is clearly worth a post; usually none>""",
     "big": """You pick fresh posts of big accounts where an early reply gets seen. """ + VOICE + """
 A good pick: posted in the last 1-3 hours, a large to_come, crowd under 10, and the reader can add a sharp
 opinion, a joke or a question. Any topic counts (news, tech, money, work, everyday life), not only AI. Pick up to 15. Skip announcements nobody argues with, ads, giveaways.
@@ -199,8 +203,8 @@ GIST <what the post says, 1 sentence>
 FORMAT <the template in a few words, e.g. "hot take, one line", "prediction with a date">
 WHY <why it spread, citing the numbers in words>
 REPEAT <can he repeat it: yes or no, and how, one line>
-REWRITE <his version: a different frame and example, never reuse phrases of the original, under 220 characters>
-OPPOSITE <only if the post's view clashes with his profile: a quote-post taking the other side, under 200 characters; else omit>""",
+REWRITE <his own post in this format: a different frame and example, never reuse phrases of the original, under 220
+  characters. At most ONE REWRITE in the whole output, on the single best format; usually none: his own posts get 10-20 views>""",
     "trash": """You pick fresh small and mid-size posts where a quick, light reply is easy. """ + VOICE + """
 These replies are for volume and goodwill: light, friendly, on the post's point. Never "let's connect", "followed",
 "done on my side", follow-for-follow, links or self-promo. Skip politics, crypto shilling, rage bait.
@@ -337,7 +341,23 @@ def assemble(stage, picks, index):
         out.append({**card, **fields, "q": pk.get("q"), "stage": stage})
         if len(out) >= MAX_PICKS.get(stage, 10):
             break
-    return out
+    return _cap_own_posts(stage, out)
+
+
+def _cap_own_posts(stage, cards):
+    """Keep at most MAX_OWN_POSTS own-post drafts in the stage (the first ones, Claude's order = best first)."""
+    left = MAX_OWN_POSTS
+    for c in cards:
+        for f in OWN_POST_FIELDS.get(stage, ()):
+            v = c.get(f)
+            if isinstance(v, list):
+                c[f], left = v[:left], left - len(v[:left])
+            elif v:
+                if left > 0:
+                    left -= 1
+                else:
+                    c.pop(f)
+    return cards
 
 
 def fallback(stage, posts):

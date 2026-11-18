@@ -2,10 +2,10 @@
 // Tabs fill up while the run goes on; every card has a "done" box, boxes belong to the run, so a new Run starts clean.
 (() => {
   const STAGES = [
-    ["news", "News", "at most 1 own post a day; reply here only while the post is under 3h"],
+    ["news", "News", "replies under the hottest stories while the post is under 3h; at most 1 own post a day"],
     ["big", "Big accounts", "the main source: reply while the post is under 3h and the thread is quiet"],
     ["more", "More", "every other post that passed the checks, also still-fresh ones from earlier runs"],
-    ["viral", "Viral", "formats to learn from, too old to reply under"],
+    ["viral", "Viral", "formats to learn from, too old to reply under; at most 1 own post draft"],
     ["trash", "Trash", "replies under smaller posts that are taking off, stay under the limit"],
     ["topics", "Topics", "what survived your topics"],
   ];
