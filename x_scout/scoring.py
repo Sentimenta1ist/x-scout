@@ -26,6 +26,8 @@ DEFAULTS = {
     "reply_min": 1000,
     "reply_max": 200_000,
 }
+# Posts he scrolled past himself (x-viral-radar feed): he already picked them, so the checks are looser and Claude decides.
+FEED_FIT = {"fit_min_views": 20_000, "fit_max_crowd": 15}
 # Typical post reaches ~15% of follower count in views. Rough assumption, only used without author history.
 FOLLOWER_VIEW_RATIO = 0.15
 
@@ -124,7 +126,7 @@ def reply_fit(tweet, cfg=None):
     elif c >= cfg["fit_max_crowd"]:
         why.append("crowded thread")
     if projected < cfg["fit_min_views"]:
-        why.append("won't reach 50k")
+        why.append(f"won't reach {cfg['fit_min_views'] // 1000}k")
     return {"ok": not why, "why": why, "crowd": round(c, 1), "projected": round(projected)}
 
 

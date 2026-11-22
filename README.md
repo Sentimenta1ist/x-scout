@@ -29,7 +29,13 @@ X Scout does the scrolling. You press **Run**, go answer your own replies, and t
 
 X Scout never posts, likes, follows or clicks. It reads, Claude drafts, you write and send.
 
-## The daily run
+## The session (since November 2026)
+
+**Run no longer searches X.** It starts a session: you scroll X yourself for about 10 minutes with [x-viral-radar](https://github.com/Sentimenta1ist/x-viral-radar) on, and the radar sends every fresh post you scroll past to X Scout. Scroll your For You feed, the searches and the big accounts listed under **What to scroll** (links that open in your own Chrome). Every 10 posts that pass the reply checks (or every 2 minutes), Claude reads the batch and adds reply cards to **Replies** while you keep scrolling. Press **Finish** when you are done: the last batch is read and the run closes with a summary. Nothing in this flow talks to X from any account; you are just scrolling.
+
+The stages below are how runs worked before; older runs still show these tabs.
+
+## The daily run (before November 2026)
 
 One button runs five stages in order. Claude analyzes a stage while the next one is being searched, so you can start on News while Viral is still loading.
 
@@ -121,7 +127,7 @@ The app opens at http://127.0.0.1:8765.
 
 1. **Log in to X.** Click *Log in to X*: a Chrome window opens and closes itself once you reach the home feed. The session lives in `data/browser-profile` and lasts for months. **Use a secondary account**: any automation carries some risk for the account that runs it, and reading from a second account keeps your main one clean.
 2. **Settings.** Set your handle (for the weekly self-check), the daily trash limit, and optionally your own list of big accounts and topics. Write a few lines in **About me**: what you post about, your opinions, what is noise. See [`profile.example.md`](profile.example.md).
-3. **Run.** Work on each tab as it turns ready.
+3. **Run.** Turn on x-viral-radar, press Run and scroll X; reply cards appear in Replies. Press Finish when done. (Log in to X is only needed for Profiles and Post analysis.)
 
 ### Try it without an X account
 

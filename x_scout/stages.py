@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from .analyze import _age, _k, _norm, is_junk, slim
 from .browser import MAX_AUTHORS, authors_query
 from .parse import compact_text
-from .scoring import crowd, project_views, reply_fit, reply_value
+from .scoring import FEED_FIT, crowd, project_views, reply_fit, reply_value
 
 ORDER = ["news", "big", "viral", "trash", "topics"]
 LABELS = {"news": "News", "big": "Big accounts", "viral": "Viral", "trash": "Trash", "topics": "Topics", "more": "More", "feed": "Feed"}
@@ -27,7 +27,7 @@ MAX_PICKS = {"news": 8, "big": 20, "viral": 12, "trash": 10, "more": 25, "feed":
 MORE_POOL = 60  # candidates the More call reads
 MIN_Q = 3
 # own posts get 10-20 views, replies are the growth: at most this many own-post drafts per stage, best pick first
-OWN_POST_FIELDS = {"news": ("take",), "viral": ("rewrite", "opposite")}
+OWN_POST_FIELDS = {"news": ("take",), "viral": ("rewrite", "opposite"), "feed": ("take",)}
 MAX_OWN_POSTS = 2  # News 2 + Viral 2 = the 3-4 own posts a day he wants (2026-11-18)
 
 
@@ -119,8 +119,9 @@ def select(stage, posts, settings=None):
         pool = [p for p in _clean(posts, 48 * 60) if (p.get("likes") or 0) >= 1000 or (p.get("views") or 0) >= 100_000]
         return sorted(pool, key=lambda p: p.get("likes") or 0, reverse=True)[:50]
     if stage == "feed":
-        # his own For You feed (x-viral-radar sends what he scrolls past): the feed already did the picking, only the reply checks
-        pool = [p for p in _clean(posts, 180) if reply_fit(p)["ok"]]
+        # what he scrolls past (feed, searches, profiles; x-viral-radar sends it): he already did the picking, only the reply
+        # checks, looser than for searched posts (FEED_FIT): Claude makes the final call
+        pool = [p for p in _clean(posts, 180) if reply_fit(p, FEED_FIT)["ok"]]
         return sorted(pool, key=lambda p: (_reply(p), _velocity(p)), reverse=True)[:60]
     if stage == "trash":
         # small posts are dead ends: under posts that ended below 50k views 1 reply in 90 reached 1k (own data 2026-11)
@@ -218,16 +219,18 @@ These replies are for volume and goodwill: light, friendly, on the post's point.
 Fields:
 SAY <a reply of 30-90 characters on the post's point, format by post type>
 SAY <another reply, a different format and angle>""",
-    "feed": """You write replies for one X account under posts from his own For You feed: he scrolled past them in the last
-minutes and they passed his reply checks (fresh, quiet thread, heading to 50k+ views). """ + VOICE + """
-Goal: as many good reply targets as the feed has, up to 30. Any topic counts (news, tech, money, work, everyday life, culture,
+    "feed": """You write replies for one X account under posts he scrolled past in the last minutes (his For You feed,
+searches, big accounts' profiles). They passed loose reply checks (fresh, thread not crowded, heading to 20k+ views): you make
+the real call, drop what is not worth his reply. """ + VOICE + """
+Goal: every good reply target in this batch, up to 30. Any topic counts (news, tech, money, work, everyday life, culture,
 sports: he likes basketball and volleyball). Skip: war and attacks, tragedies and deaths, conspiracy, politics for its own sake,
-ads, giveaways, crypto shilling, posts with nothing to say about. One story, one reply: merge posts about the same story.
-Follower counts are unknown here (shown as ?).
+ads, giveaways, crypto shilling, posts with nothing to say about, and stories in COVERED (an earlier batch already has them).
+One story, one reply: merge posts about the same story. Follower counts are unknown here (shown as ?).
 Fields:
 GIST <what the post says, 1 sentence>
 SAY <a reply of 30-90 characters on this exact post, format by post type>
-SAY <a second reply, a different format and angle>""",
+SAY <a second reply, a different format and angle>
+TAKE <optional: an own post draft under 200 characters, only on a big breaking story; at most ONE TAKE in the whole output>""",
     "more": """You write extra replies for one X account. These posts all passed his reply checks (fresh, quiet thread,
 heading to 50k+ views) but were not picked in the main tabs; some come from an earlier run and are still fresh. """ + VOICE + """
 Goal: more good reply targets, up to 25. Any topic counts (news, tech, money, work, everyday life, culture, sports:
@@ -352,7 +355,7 @@ def assemble(stage, picks, index):
         seen.add(pk["n"])
         fields = {k: v for k, v in pk.items() if k not in ("n", "q")}
         if "id" in item:
-            card = {**slim(item), "key": f"{stage}:{item['id']}", "fit": reply_fit(item)}
+            card = {**slim(item), "key": f"{stage}:{item['id']}", "fit": reply_fit(item, FEED_FIT if stage == "feed" else None)}
         else:
             card = {"trend": item, "key": f"{stage}:t:{_norm(item['name'])[:40]}"}
         out.append({**card, **fields, "q": pk.get("q"), "stage": stage})
@@ -395,12 +398,12 @@ questions or posts for a scheduler."""
 
 def summary_digest(stages, topics_result=None):
     lines = []
-    for stage in ORDER[:-1]:
+    for stage in ("feed", *ORDER[:-1]):
         picks = (stages.get(stage) or {}).get("picks") or []
         if not picks:
             continue
         lines.append(f"## {LABELS[stage]}")
-        for p in picks[:8]:
+        for p in picks[:15 if stage == "feed" else 8]:
             who = f"@{p['author']['handle']}" if p.get("author") else (p.get("trend") or {}).get("name", "")
             lines.append(f"- {who}: {compact_text(p.get('gist') or p.get('text') or (p.get('trend') or {}).get('context'), 160)}"
                          + (f" | {compact_text(p.get('why'), 100)}" if p.get("why") else "") + (f" | {p['format']}" if p.get("format") else ""))

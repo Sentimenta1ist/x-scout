@@ -31,9 +31,9 @@
       <select id="runSelect" title="Past runs" aria-label="Past runs"></select>
       <button id="reBtn" class="link" title="Run Claude again on this run's posts, no scraping">Re-analyze</button>
       <button id="logBtn" class="link">Log</button>
-      <button id="feedBtn" class="ghost" title="Replies under posts you scrolled past in your own For You feed (sent by X Viral Radar). No X search, about a minute">From feed</button>
-      <button id="runBtn" class="primary">Run</button>
-      <button id="stopBtn" class="ghost hidden" title="Stop this run. Posts scraped so far are not kept">Stop</button>
+      <button id="runBtn" class="primary" title="Start a session: scroll X yourself with X Viral Radar on, Claude reads what you scroll past in batches">Run</button>
+      <button id="finishBtn" class="primary hidden" title="Done scrolling: Claude reads the last posts and closes the run">Finish</button>
+      <button id="stopBtn" class="ghost hidden" title="Stop now: cards already written stay, posts not yet read are dropped">Stop</button>
     </div>
   </header>
 
@@ -47,6 +47,11 @@
     <pre id="log" class="log hidden"></pre>
   </section>
 
+  <details id="hints" class="hints">
+    <summary>What to scroll <span class="hint">paste into X search or open; the radar picks up posts on any page</span></summary>
+    <div id="hintsBody"></div>
+  </details>
+
   <main class="feed">
     <nav id="stageTabs" class="ftabs stabs hidden" aria-label="Stages"></nav>
     <nav id="tabs" class="ftabs" aria-label="Topics"></nav>
@@ -54,9 +59,9 @@
     <div id="board" class="fboard"></div>
     <div id="empty" class="empty hidden">
       <h2>No runs yet</h2>
-      <p>1. <b>Log in to X</b> (a Chrome window opens, use your secondary account).<br>
-         2. Press <b>Run</b>. About 30 minutes, paced like a person: News, Big accounts, Viral, Trash and Topics fill in one by one.<br>
-         3. Work tab by tab, tick what you did, finish with the <b>Checklist</b>. Topics are optional (Settings).</p>
+      <p>1. Turn on <b>X Viral Radar</b> in your own Chrome.<br>
+         2. Press <b>Run</b> and scroll X for ~10 minutes: For You, the searches and big accounts under <b>What to scroll</b>.<br>
+         3. Claude reads what you scroll past in batches of 10; reply cards appear in <b>Replies</b> while you scroll. <b>Finish</b> when done.</p>
     </div>
   </main>
   </div>

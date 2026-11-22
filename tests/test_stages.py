@@ -98,46 +98,54 @@ def test_db_stage_and_checks(tmp_path, monkeypatch):
     assert db.set_check(999, "x", True) is None
 
 
-def test_day_run_fills_stages_in_order(tmp_path, monkeypatch):
+def test_session_reads_radar_posts_in_batches(tmp_path, monkeypatch):
+    import time as _t
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
     db.init()
-    seen = []
-
-    class FakeSession:
-        def __init__(self, *a, **k):
-            self.budget = type("B", (), {"calls": 3, "waited": 0})()
-            self.log = lambda m: None
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *e):
-            pass
-
-        async def explore(self):
-            return []
-
-        async def search(self, mode, query, target):
-            seen.append(query)
-            return [post(len(seen), age=20, followers=150_000)], 200
-
-    monkeypatch.setattr(pipeline.browser, "Session", FakeSession)
-    monkeypatch.setattr(pipeline, "score_posts", lambda posts: posts)
-    monkeypatch.setattr(db, "save_posts", lambda posts: None)
+    monkeypatch.setattr(db, "author_history", lambda *a, **k: [])
+    monkeypatch.setattr(db, "last_snapshot", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "BATCH_SIZE", 1)
+    monkeypatch.setattr(pipeline, "BATCH_MAX", 1)
+    pipeline.FEED.clear()
+    now_ms = _t.time() * 1000
+    pipeline.feed_add([
+        {"id": str(i), "handle": f"a{i}", "created": now_ms - 40 * 60000, "text": f"fresh post number {i} taking off", "views": 30000, "replies": 5, "likes": 900}
+        for i in (1, 2)])
+    prompts = []
 
     def fake_claude(prompt, model=None, system=None, raw=False, timeout=600):
         if "end-of-run brief" in system:
-            return "SUMMARY hot day\nREC do the news", {"input_tokens": 1, "output_tokens": 1, "cost_usd_equiv": 0, "duration_s": 0}
-        return "P 1 5\nGIST g\nSAY s", {"input_tokens": 1, "output_tokens": 1, "cost_usd_equiv": 0, "duration_s": 0}
+            return "SUMMARY quiet day\nREC reply more", {"input_tokens": 1, "output_tokens": 1, "cost_usd_equiv": 0, "duration_s": 0}
+        prompts.append(prompt)
+        pipeline.session["finish"] = True  # he presses Finish while Claude reads the first batch
+        return "P 1 5\nGIST g\nSAY s\nTAKE t", {"input_tokens": 1, "output_tokens": 1, "cost_usd_equiv": 0, "duration_s": 0}
 
     monkeypatch.setattr(analyze, "run_claude", fake_claude)
-    settings = {**pipeline.DEFAULT_SETTINGS, "topics": [], "stages": {"news": True, "big": True, "viral": False, "trash": True}}
-    asyncio.run(pipeline.run_day(settings))
+    asyncio.run(pipeline.run_session({**pipeline.DEFAULT_SETTINGS}))
     r = db.get_run(db.latest_run_id())
-    assert r["kind"] == "day" and r["status"] == "done"
-    assert set(r["stages"]) == {"news", "big", "trash", "more", "summary"}
-    assert all(r["stages"][s]["status"] == "ready" for s in ("news", "big", "trash"))
-    assert r["stages"]["summary"]["recs"] == ["do the news"]
+    assert r["kind"] == "day" and r["status"] == "done" and r["stats"]["batches"] == 2
+    assert len(prompts) == 2 and "COVERED" in prompts[1]  # the second batch knows what the first one covered
+    feed = r["stages"]["feed"]
+    assert feed["status"] == "ready" and {p["id"] for p in feed["picks"]} == {"1", "2"}
+    assert feed["picks"][0]["take"] == ["t"] and r["stages"]["summary"]["recs"] == ["reply more"]
+    pipeline.FEED.clear()
+
+
+def test_search_hints_turn_scraper_queries_into_links():
+    from datetime import datetime, timezone
+    h = pipeline.search_hints({**pipeline.DEFAULT_SETTINGS, "big_accounts": ["@karpathy"]}, now=datetime(2026, 11, 22, tzinfo=timezone.utc))
+    assert h["searches"] and all("since_time" not in q["query"] for q in h["searches"])
+    assert any("within_time:12h" in q["query"] for q in h["searches"])
+    assert any(q["mode"] == "Latest" and q["url"].endswith("&f=live") for q in h["searches"])
+    assert h["accounts"] == [{"handle": "karpathy", "url": "https://x.com/karpathy"}]
+
+
+def test_feed_checks_are_looser_than_search_checks():
+    from x_scout.scoring import FEED_FIT, reply_fit
+    mid = {"views": 4000, "replies": 3, "age_min": 40}  # heading to ~17-25k
+    p = {"views": 6000, "replies": 8, "age_min": 40, "id": "9", "text": "a mid post taking off now", "author": {"handle": "a"}}
+    assert not reply_fit(p)["ok"] and reply_fit(p, FEED_FIT)["ok"]
+    assert reply_fit(mid)["why"] == ["won't reach 50k"]
 
 
 def test_select_ranks_by_reply_value_and_news_window_is_6h():

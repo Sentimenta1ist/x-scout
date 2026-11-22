@@ -7,7 +7,7 @@
     ["posts", "Posts", "3-4 own posts for today"],
   ];
   const STAGES = [
-    ["feed", "Feed", "posts you scrolled past in your For You feed (X Viral Radar), checked and drafted"],
+    ["feed", "Feed", "posts you scrolled past (X Viral Radar), read by Claude in batches while you scroll"],
     ["news", "News", "replies under the hottest stories while the post is under 3h; at most 1 own post a day"],
     ["big", "Big accounts", "the main source: reply while the post is under 3h and the thread is quiet"],
     ["more", "More", "every other post that passed the checks, also still-fresh ones from earlier runs"],
@@ -22,7 +22,7 @@
     viral: [["grok", "grok"], ["rewrite", "post"], ["opposite", "quote"], ["opinion", "topic"]],
     trash: [["say", "say"]],
     more: [["say", "say"]],
-    feed: [["say", "say"]],
+    feed: [["say", "say"], ["take", "post"]],
   };
   // the three checks before a reply (scoring.reply_fit); age is recomputed from created_at: a card cools while you read
   const REPLY_STAGES = new Set(["feed", "news", "big", "trash", "more"]);
@@ -115,7 +115,8 @@
 
   function ownPosts(run) {
     const st = run.stages || {};
-    return [...((st.news || {}).picks || []).filter((p) => p.take && p.take.length),
+    return [...((st.feed || {}).picks || []).filter((p) => p.take && p.take.length),
+            ...((st.news || {}).picks || []).filter((p) => p.take && p.take.length),
             ...((st.viral || {}).picks || []).filter((p) => p.rewrite)];
   }
 
@@ -129,7 +130,7 @@
     const sub = kind === "replies" ? `${done} sent of ${warm.length} fresh` : `${done} posted · aim for 3-4`;
     sec.innerHTML = `<h2>${LABEL[kind]}<span class="n">${warm.length}</span><span class="sub">${esc(sub)}</span></h2>`;
     const busy = Object.values(run.stages || {}).some((s) => s && ["waiting", "scraping", "analyzing"].includes(s.status));
-    if (busy) sec.insertAdjacentHTML("beforeend", `<p class="fnone">The run is still going: cards are added as stages finish.</p>`);
+    if (busy) sec.insertAdjacentHTML("beforeend", `<p class="fnone">Keep scrolling: every 10 posts that pass the checks, Claude adds cards here.</p>`);
     else if (!list.length) sec.insertAdjacentHTML("beforeend", `<p class="fnone">Nothing here in this run. Press Run for fresh posts.</p>`);
     if (kind === "replies") {
       const ref = run.finished_at || run.started_at;

@@ -43,7 +43,7 @@ def _busy():
 async def startup():
     db.init()
     db.mark_stale_runs()
-    _spawn(login_check())  # so the pill shows the real session state on open
+    # no login check on open: it opens X with the scout's account; Run never needs it (Profiles and Post still do)
 
 
 @app.get("/")
@@ -107,8 +107,21 @@ async def login_check():
 @app.post("/api/run")
 async def start_run():
     _busy()
-    _spawn(pipeline.run_day(pipeline.load_settings()))
+    _spawn(pipeline.run_session(pipeline.load_settings()))
     return {"ok": True}
+
+
+@app.post("/api/run/finish")
+def finish_run():
+    if not pipeline.finish_session():
+        raise HTTPException(409, "no session is running")
+    return {"ok": True}
+
+
+@app.get("/api/hints")
+def hints():
+    """What to scroll by hand: search links and big accounts."""
+    return pipeline.search_hints(pipeline.load_settings())
 
 
 @app.post("/api/feed")
@@ -120,13 +133,6 @@ def feed_in(body: dict = Body(...)):
 @app.get("/api/feed")
 def feed_state():
     return {"kept": len(pipeline.FEED), "fit": len(pipeline.feed_cands()) if pipeline.FEED else 0}
-
-
-@app.post("/api/feed/run")
-async def feed_run():
-    _busy()
-    _spawn(pipeline.run_feed(pipeline.load_settings()))
-    return {"ok": True}
 
 
 @app.post("/api/stop")

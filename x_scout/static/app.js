@@ -246,12 +246,14 @@ async function refresh() {
                 checking: ["X: checking…", ""], unknown: ["X: press Check", ""] }[s.login] || ["X: ?", ""];
     pill.textContent = L[0]; pill.className = "pill " + L[1];
     const busy = s.running || s.login === "waiting" || s.login === "checking";
-    ["runBtn", "feedBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
-    $("feedBtn").classList.toggle("hidden", s.running);
+    ["runBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
+    const session = s.running && s.kind === "run";
+    $("finishBtn").classList.toggle("hidden", !session);
+    if (session && !$("hints").dataset.touched) $("hints").open = true;  // while scrolling the list is what he needs
     if (!s.running) api("/api/feed").then((f) => {
-      $("feedBtn").textContent = f.kept ? `From feed · ${f.fit}` : "From feed";
-      $("feedBtn").title = f.kept ? `${f.kept} posts scrolled in the last 3 h, ${f.fit} pass the reply checks now. No X search, about a minute`
-                                  : "Scroll your For You feed with X Viral Radar on: the posts land here";
+      $("runBtn").textContent = f.kept ? `Run · ${f.fit}` : "Run";
+      $("runBtn").title = (f.kept ? `${f.kept} posts from the radar in the last 3 h, ${f.fit} pass the reply checks now. ` : "")
+                          + "Start a session: scroll X yourself with X Viral Radar on, Claude reads what you scroll past in batches";
     }).catch(() => {});
     $("reBtn").disabled = busy || !(current && current.has_candidates);
     $("runBtn").classList.toggle("hidden", s.running);
@@ -362,7 +364,29 @@ for (const [view, [, nav, ic, label]] of Object.entries(VIEWS)) {
 try { setView(localStorage.getItem("view") || "feed"); } catch { setView("feed"); }
 
 const act = (fn) => async () => { try { await fn(); } catch (e) { alert(e.message); } refresh(); };
-$("feedBtn").onclick = act(() => { pinned = null; return post("/api/feed/run"); });
+$("finishBtn").onclick = act(() => post("/api/run/finish"));
+$("hints").addEventListener("toggle", () => { $("hints").dataset.touched = "1"; });
+
+// ---- what to scroll: the old scraper's searches as links, big accounts as profiles ----
+async function loadHints() {
+  let h;
+  try { h = await api("/api/hints"); } catch { return; }
+  const body = $("hintsBody");
+  body.innerHTML = "";
+  for (const q of h.searches) {
+    const row = document.createElement("div");
+    row.className = "hrow";
+    row.innerHTML = `<span class="hst">${esc(q.stage)} · ${esc(q.mode)}</span><code>${esc(q.query)}</code>
+      <a class="fopen" href="${q.url}" target="_blank" rel="noopener" title="Open this search on X">↗</a>`;
+    row.insertBefore(copyBtn(q.query), row.querySelector("a"));
+    body.appendChild(row);
+  }
+  const acc = document.createElement("p");
+  acc.className = "haccs";
+  acc.innerHTML = `<span class="hst">Big accounts</span> ` + h.accounts.map((a) => `<a href="${a.url}" target="_blank" rel="noopener">@${esc(a.handle)}</a>`).join(" ");
+  body.appendChild(acc);
+}
+loadHints();
 $("runBtn").onclick = act(() => { pinned = null; return post("/api/run"); });  // a new run is followed again
 $("stopBtn").onclick = act(() => post("/api/stop"));
 $("loginBtn").onclick = act(() => post("/api/login"));
