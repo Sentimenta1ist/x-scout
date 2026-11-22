@@ -60,35 +60,6 @@ async def _context(pw, headless):
         return await pw.chromium.launch_persistent_context(**kwargs)
 
 
-async def check_login():
-    async with _lock, async_playwright() as pw:
-        ctx = await _context(pw, headless=True)
-        try:
-            cookies = await ctx.cookies("https://x.com")
-            return any(c["name"] == "auth_token" for c in cookies)
-        finally:
-            await ctx.close()
-
-
-async def interactive_login(timeout_s=600):
-    """Open a visible window on the login page and wait until the user lands on /home."""
-    async with _lock, async_playwright() as pw:
-        ctx = await _context(pw, headless=False)
-        try:
-            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            await page.goto("https://x.com/i/flow/login")
-            deadline = asyncio.get_event_loop().time() + timeout_s
-            while asyncio.get_event_loop().time() < deadline:
-                cookies = await ctx.cookies("https://x.com")
-                if any(c["name"] == "auth_token" for c in cookies) and "/home" in page.url:
-                    await asyncio.sleep(2)
-                    return True
-                await asyncio.sleep(1.5)
-            return False
-        finally:
-            await ctx.close()
-
-
 MAX_AUTHORS = 15  # keeps the from: query well under X's query length limit
 KIND_ORDER = {"main": 0, "authors": 1, "extra": 2}
 

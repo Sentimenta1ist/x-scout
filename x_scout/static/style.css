@@ -271,8 +271,6 @@ body { display: flex; min-height: 100vh; }
 .nav-busy { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: busy 1.2s ease-in-out infinite; }
 @keyframes busy { 50% { opacity: .3; } }
 .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
-.side-foot .pill { align-self: flex-start; margin-left: 10px; }
-.side-login { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 10px; }
 .top { justify-content: flex-end; }
 @media (max-width: 760px) {
   body { flex-direction: column; }
@@ -280,8 +278,6 @@ body { display: flex; min-height: 100vh; }
   .side-nav { flex-direction: row; }
   .side-nav button, #settingsBtn { width: auto; }
   .side-foot { width: 100%; margin-top: 0; flex-direction: row; flex-wrap: wrap; align-items: center; }
-  .side-foot .pill { align-self: center; margin-left: 0; }
-  .side-login { padding: 0; }
 }
 
 /* simpler profile screens */

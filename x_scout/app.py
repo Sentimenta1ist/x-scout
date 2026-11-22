@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import browser, db, pipeline, post_analysis, profile_store
+from . import db, pipeline, post_analysis, profile_store
 from .typer import typer
 from .config import PORT, PROFILE_MD, ROOT
 
@@ -24,7 +24,6 @@ async def always_revalidate(request, call_next):
     return response
 
 
-login_state = {"status": "unknown"}  # unknown | checking | waiting | ok | no
 _tasks = set()
 
 
@@ -35,15 +34,14 @@ def _spawn(coro):
 
 
 def _busy():
-    if pipeline.state["running"] or login_state["status"] in ("checking", "waiting"):
-        raise HTTPException(409, "busy: a run or login is in progress")
+    if pipeline.state["running"]:
+        raise HTTPException(409, "busy: a run is in progress")
 
 
 @app.on_event("startup")
 async def startup():
     db.init()
     db.mark_stale_runs()
-    # no login check on open: it opens X with the scout's account; Run never needs it (Profiles and Post still do)
 
 
 @app.get("/")
@@ -53,7 +51,7 @@ def index():
 
 @app.get("/api/state")
 def get_state():
-    return {**pipeline.state, "login": login_state["status"]}
+    return pipeline.state
 
 
 @app.get("/api/settings")
@@ -76,32 +74,6 @@ def get_profile():
 def set_profile(body: dict = Body(...)):
     PROFILE_MD.write_text(body.get("text", ""))
     return {"ok": True}
-
-
-@app.post("/api/login")
-async def login():
-    _busy()
-
-    async def go():
-        login_state["status"] = "waiting"
-        try:
-            login_state["status"] = "ok" if await browser.interactive_login() else "no"
-        except Exception:
-            login_state["status"] = "no"
-
-    _spawn(go())
-    return {"ok": True}
-
-
-@app.post("/api/login/check")
-async def login_check():
-    _busy()
-    login_state["status"] = "checking"
-    try:
-        login_state["status"] = "ok" if await browser.check_login() else "no"
-    except Exception:
-        login_state["status"] = "no"
-    return {"login": login_state["status"]}
 
 
 @app.post("/api/run")

@@ -196,7 +196,7 @@ async def run(settings):
         _log("stopped")
         db.finish_run(run_id, "stopped", stats={**stats, "error": "stopped"})
     except browser.NeedLogin:
-        _log("X asks to log in: press 'Log in to X' and retry")
+        _log("X session of the scout's Chrome profile is gone: Profiles and Post links need it")
         db.finish_run(run_id, "error", stats={**stats, "error": "need_login"})
     except browser.RateLimited:
         _log("X rate limit (429): stopped. Wait an hour before the next run.")
@@ -608,7 +608,7 @@ async def analyze_profile(handle, settings):
     except asyncio.CancelledError:
         partial("stopped", "stopped")
     except browser.NeedLogin:
-        partial("need_login", "X asks to log in: press 'Log in to X' and retry")
+        partial("need_login", "X session of the scout's Chrome profile is gone: Profiles and Post links need it")
     except browser.RateLimited:
         partial("rate_limited", "X rate limit (429): stopped. Wait an hour before the next run.")
     except LookupError as e:
@@ -703,7 +703,7 @@ async def analyze_post(ref, settings):
         state.update(error="stopped")
     except browser.NeedLogin:
         _log("X asks to log in")
-        state.update(error="X asks to log in: press 'Log in to X' and retry")
+        state.update(error="X session of the scout's Chrome profile is gone: Profiles and Post links need it")
     except browser.RateLimited:
         _log("X rate limit (429): stopped")
         state.update(error="X rate limit (429). Wait an hour before the next run.")

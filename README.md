@@ -125,9 +125,9 @@ cd x-scout
 
 The app opens at http://127.0.0.1:8765.
 
-1. **Log in to X.** Click *Log in to X*: a Chrome window opens and closes itself once you reach the home feed. The session lives in `data/browser-profile` and lasts for months. **Use a secondary account**: any automation carries some risk for the account that runs it, and reading from a second account keeps your main one clean.
+1. **Install x-viral-radar** in your own Chrome (unpacked extension). X Scout has no X login: everything comes from what you scroll. Profiles and Post links still read X through an X session in `data/browser-profile`, if one is there.
 2. **Settings.** Set your handle (for the weekly self-check), the daily trash limit, and optionally your own list of big accounts and topics. Write a few lines in **About me**: what you post about, your opinions, what is noise. See [`profile.example.md`](profile.example.md).
-3. **Run.** Turn on x-viral-radar, press Run and scroll X; reply cards appear in Replies. Press Finish when done. (Log in to X is only needed for Profiles and Post analysis.)
+3. **Run.** Turn on x-viral-radar, press Run and scroll X; reply cards appear in Replies. Press Finish when done.
 
 ### Try it without an X account
 

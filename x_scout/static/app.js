@@ -241,12 +241,8 @@ async function loadRun(id) {
 async function refresh() {
   try {
     const s = await api("/api/state");
-    const pill = $("loginPill");
-    const L = { ok: ["X: logged in", "ok"], no: ["X: not logged in", "no"], waiting: ["X: finish login in the Chrome window", ""],
-                checking: ["X: checking…", ""], unknown: ["X: press Check", ""] }[s.login] || ["X: ?", ""];
-    pill.textContent = L[0]; pill.className = "pill " + L[1];
-    const busy = s.running || s.login === "waiting" || s.login === "checking";
-    ["runBtn", "loginBtn", "checkBtn"].forEach((id) => ($(id).disabled = busy));
+    const busy = s.running;
+    $("runBtn").disabled = busy;
     const session = s.running && s.kind === "run";
     $("finishBtn").classList.toggle("hidden", !session);
     if (session && !$("hints").dataset.touched) $("hints").open = true;  // while scrolling the list is what he needs
@@ -389,8 +385,6 @@ async function loadHints() {
 loadHints();
 $("runBtn").onclick = act(() => { pinned = null; return post("/api/run"); });  // a new run is followed again
 $("stopBtn").onclick = act(() => post("/api/stop"));
-$("loginBtn").onclick = act(() => post("/api/login"));
-$("checkBtn").onclick = act(() => post("/api/login/check"));
 $("reBtn").onclick = act(() => post(`/api/runs/${$("runSelect").value}/reanalyze`));
 $("saveBtn").onclick = act(saveSettings);
 $("addTopic").onclick = () => document.querySelectorAll(".topic-row").length < MAX_TOPICS && $("topics").appendChild(topicRow());

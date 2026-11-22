@@ -65,7 +65,7 @@
   window.postPanel = {
     async onState(s) {
       const job = s.running && s.kind === "post";
-      const busy = s.running || s.login === "waiting" || s.login === "checking";
+      const busy = s.running;
       $("poGo").disabled = busy; $("poRe").disabled = busy || !data;
       $("poGo").classList.toggle("hidden", job); $("poStop").classList.toggle("hidden", !job);
       $("poProgress").classList.toggle("hidden", !job);

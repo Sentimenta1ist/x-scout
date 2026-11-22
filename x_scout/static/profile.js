@@ -332,7 +332,7 @@
   window.profilePanel = {
     async onState(s) {
       const job = s.running && s.kind === "profile";
-      const busy = s.running || s.login === "waiting" || s.login === "checking";
+      const busy = s.running;
       $("pfGo").disabled = busy; $("pfRe").disabled = busy || !data;
       $("pfGo").classList.toggle("hidden", job); $("pfStop").classList.toggle("hidden", !job);
       $("pfProgress").classList.toggle("hidden", !job);
